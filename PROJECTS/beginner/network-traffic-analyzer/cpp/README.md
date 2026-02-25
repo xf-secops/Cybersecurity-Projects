@@ -26,6 +26,10 @@ Or grant capabilities:
 sudo setcap cap_net_raw,cap_net_admin=eip ./network-traffic-analyzer
 ```
 
+Or you can use `just` command 
+```
+just run 
+ ```
 ---
 
 # Features
@@ -59,29 +63,28 @@ sudo setcap cap_net_raw,cap_net_admin=eip ./network-traffic-analyzer
 - FTXUI
 - CMake
 
-# Build
-```
-mkdir build && cd build
-cmake ..
-make
+# Setup 
+## 1. clone the repo then
+```bash
+cd network-traffic-analyzer
+./install.sh
 ```
 
 # Usage Example
 
 ### Live capture on eth0
 ```
-sudo ./network-traffic-analyzer -i eth0
+just capture -i eth0
 ```
 ### Capture 100 packets
 ```
-sudo ./network-traffic-analyzer -i wlan0 -c 100
+just run -i wlan0 -c 100
 ```
 ### Analyze offline pcap file
 ```
-sudo ./network-traffic-analyzer --offline traffic.pcap
+just run --offline traffic.pcap
 ```
 ### Export results (json / csv)
 ```
-sudo ./network-traffic-analyzer --json result.json --csv result.csv
-
+just run --json result.json --csv result.csv
 ```
