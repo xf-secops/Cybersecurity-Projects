@@ -30,7 +30,7 @@ const calculateRetryDelay = (attemptIndex: number): number => {
 
 const handleQueryCacheError = (
   error: Error,
-  query: { state: { data: unknown } },
+  query: { state: { data: unknown } }
 ): void => {
   if (query.state.data !== undefined) {
     const message =
@@ -45,7 +45,7 @@ const handleMutationCacheError = (
   error: Error,
   _variables: unknown,
   _context: unknown,
-  mutation: { options: { onError?: unknown } },
+  mutation: { options: { onError?: unknown } }
 ): void => {
   if (mutation.options.onError === undefined) {
     const message =

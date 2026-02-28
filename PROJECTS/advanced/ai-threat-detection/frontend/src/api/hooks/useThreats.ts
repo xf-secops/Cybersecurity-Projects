@@ -4,9 +4,9 @@
 // ===================
 
 import { useQuery } from '@tanstack/react-query'
-import { QUERY_KEYS, API_ENDPOINTS, PAGINATION } from '@/config'
+import type { ThreatEvent, ThreatList } from '@/api/types'
+import { API_ENDPOINTS, PAGINATION, QUERY_KEYS } from '@/config'
 import { apiClient, QUERY_STRATEGIES } from '@/core/api'
-import type { ThreatList, ThreatEvent } from '@/api/types'
 
 interface ThreatParams {
   limit?: number
@@ -29,7 +29,7 @@ export function useThreats(params: ThreatParams = {}) {
     queryFn: async () => {
       const { data } = await apiClient.get<ThreatList>(
         API_ENDPOINTS.THREATS.LIST,
-        { params: queryParams },
+        { params: queryParams }
       )
       return data
     },
@@ -42,7 +42,7 @@ export function useThreat(id: string | null) {
     queryKey: QUERY_KEYS.THREATS.BY_ID(id ?? ''),
     queryFn: async () => {
       const { data } = await apiClient.get<ThreatEvent>(
-        API_ENDPOINTS.THREATS.BY_ID(id!),
+        API_ENDPOINTS.THREATS.BY_ID(id as string)
       )
       return data
     },

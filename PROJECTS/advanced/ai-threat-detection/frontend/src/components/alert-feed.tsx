@@ -5,8 +5,8 @@
 
 import { useEffect, useRef } from 'react'
 import type { WebSocketAlert } from '@/api/types'
-import { SeverityBadge } from './severity-badge'
 import styles from './alert-feed.module.scss'
+import { SeverityBadge } from './severity-badge'
 
 interface AlertFeedProps {
   alerts: WebSocketAlert[]
@@ -25,11 +25,13 @@ export function AlertFeed({
 }: AlertFeedProps): React.ReactElement {
   const listRef = useRef<HTMLDivElement>(null)
 
+  const alertCount = alerts.length
+  // biome-ignore lint/correctness/useExhaustiveDependencies: scroll on new alerts
   useEffect(() => {
     if (listRef.current) {
       listRef.current.scrollTop = 0
     }
-  }, [alerts.length])
+  }, [alertCount])
 
   return (
     <div className={styles.feed}>
@@ -50,9 +52,7 @@ export function AlertFeed({
         ) : (
           alerts.map((alert, i) => (
             <div key={`${alert.timestamp}-${i}`} className={styles.row}>
-              <span className={styles.time}>
-                {formatTime(alert.timestamp)}
-              </span>
+              <span className={styles.time}>{formatTime(alert.timestamp)}</span>
               <span className={styles.ip}>{alert.source_ip}</span>
               <span className={styles.path}>{alert.request_path}</span>
               <SeverityBadge

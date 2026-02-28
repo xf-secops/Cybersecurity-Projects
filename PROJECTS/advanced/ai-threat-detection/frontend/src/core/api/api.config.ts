@@ -20,5 +20,5 @@ apiClient.interceptors.response.use(
   (response) => response,
   (error: AxiosError): Promise<never> => {
     return Promise.reject(transformAxiosError(error))
-  },
+  }
 )

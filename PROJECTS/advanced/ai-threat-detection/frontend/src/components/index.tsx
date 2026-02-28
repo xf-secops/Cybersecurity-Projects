@@ -3,7 +3,7 @@
 // index.tsx
 // ===================
 
+export { AlertFeed } from './alert-feed'
 export { SeverityBadge } from './severity-badge'
 export { StatCard } from './stat-card'
-export { AlertFeed } from './alert-feed'
 export { ThreatDetail } from './threat-detail'

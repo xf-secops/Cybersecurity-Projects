@@ -5,8 +5,8 @@
 
 import { useEffect, useRef } from 'react'
 import { create } from 'zustand'
+import { type WebSocketAlert, WebSocketAlertSchema } from '@/api/types'
 import { ALERTS, WS_ENDPOINTS } from '@/config'
-import { WebSocketAlertSchema, type WebSocketAlert } from '@/api/types'
 
 interface AlertState {
   alerts: WebSocketAlert[]
@@ -31,11 +31,9 @@ const useAlertStore = create<AlertState>()((set) => ({
   setConnected: (connected) =>
     set({ isConnected: connected, connectionError: null }),
 
-  setError: (error) =>
-    set({ isConnected: false, connectionError: error }),
+  setError: (error) => set({ isConnected: false, connectionError: error }),
 
-  clear: () =>
-    set({ alerts: [], isConnected: false, connectionError: null }),
+  clear: () => set({ alerts: [], isConnected: false, connectionError: null }),
 }))
 
 function getWsUrl(): string {
@@ -82,7 +80,7 @@ export function useAlerts() {
     function scheduleReconnect() {
       const delay = Math.min(
         ALERTS.RECONNECT_BASE_MS * 2 ** retryCountRef.current,
-        ALERTS.RECONNECT_MAX_MS,
+        ALERTS.RECONNECT_MAX_MS
       )
       retryCountRef.current += 1
       retryTimerRef.current = setTimeout(connect, delay)

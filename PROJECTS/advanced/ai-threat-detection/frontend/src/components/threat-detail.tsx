@@ -24,8 +24,15 @@ export function ThreatDetail({
   if (!threat) return null
 
   return (
-    <div className={styles.overlay} onClick={onClose} onKeyDown={() => {}}>
+    // biome-ignore lint/a11y/noStaticElementInteractions: modal overlay dismiss
+    <div
+      role="presentation"
+      className={styles.overlay}
+      onClick={onClose}
+      onKeyDown={() => {}}
+    >
       <div
+        role="dialog"
         className={styles.panel}
         onClick={(e) => e.stopPropagation()}
         onKeyDown={() => {}}
@@ -80,9 +87,7 @@ export function ThreatDetail({
               </div>
               <div className={styles.field}>
                 <span className={styles.fieldLabel}>Method</span>
-                <span className={styles.fieldValue}>
-                  {threat.request_method}
-                </span>
+                <span className={styles.fieldValue}>{threat.request_method}</span>
               </div>
               <div className={styles.field}>
                 <span className={styles.fieldLabel}>Path</span>
@@ -90,9 +95,7 @@ export function ThreatDetail({
               </div>
               <div className={styles.field}>
                 <span className={styles.fieldLabel}>Status</span>
-                <span className={styles.fieldValue}>
-                  {threat.status_code}
-                </span>
+                <span className={styles.fieldValue}>{threat.status_code}</span>
               </div>
               <div className={styles.field}>
                 <span className={styles.fieldLabel}>Response Size</span>
@@ -131,16 +134,12 @@ export function ThreatDetail({
               <div className={styles.grid}>
                 <div className={styles.field}>
                   <span className={styles.fieldLabel}>Country</span>
-                  <span className={styles.fieldValue}>
-                    {threat.geo.country}
-                  </span>
+                  <span className={styles.fieldValue}>{threat.geo.country}</span>
                 </div>
                 {threat.geo.city && (
                   <div className={styles.field}>
                     <span className={styles.fieldLabel}>City</span>
-                    <span className={styles.fieldValue}>
-                      {threat.geo.city}
-                    </span>
+                    <span className={styles.fieldValue}>{threat.geo.city}</span>
                   </div>
                 )}
               </div>

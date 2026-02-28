@@ -5,16 +5,16 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { QUERY_KEYS, API_ENDPOINTS } from '@/config'
-import { apiClient, QUERY_STRATEGIES } from '@/core/api'
 import type { ModelStatus, RetrainResponse } from '@/api/types'
+import { API_ENDPOINTS, QUERY_KEYS } from '@/config'
+import { apiClient, QUERY_STRATEGIES } from '@/core/api'
 
 export function useModelStatus() {
   return useQuery<ModelStatus>({
     queryKey: QUERY_KEYS.MODELS.STATUS(),
     queryFn: async () => {
       const { data } = await apiClient.get<ModelStatus>(
-        API_ENDPOINTS.MODELS.STATUS,
+        API_ENDPOINTS.MODELS.STATUS
       )
       return data
     },
@@ -28,7 +28,7 @@ export function useRetrain() {
   return useMutation<RetrainResponse>({
     mutationFn: async () => {
       const { data } = await apiClient.post<RetrainResponse>(
-        API_ENDPOINTS.MODELS.RETRAIN,
+        API_ENDPOINTS.MODELS.RETRAIN
       )
       return data
     },

@@ -5,7 +5,14 @@
 
 import { Suspense } from 'react'
 import { ErrorBoundary } from 'react-error-boundary'
-import { LuChevronLeft, LuChevronRight, LuCpu, LuLayoutDashboard, LuMenu, LuShield } from 'react-icons/lu'
+import {
+  LuChevronLeft,
+  LuChevronRight,
+  LuCpu,
+  LuLayoutDashboard,
+  LuMenu,
+  LuShield,
+} from 'react-icons/lu'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { ROUTES } from '@/config'
 import { useUIStore } from '@/core/lib'
@@ -17,11 +24,12 @@ const NAV_ITEMS = [
   { path: ROUTES.MODELS, label: 'Models', icon: LuCpu },
 ]
 
-function ShellErrorFallback({ error }: { error: Error }): React.ReactElement {
+function ShellErrorFallback({ error }: { error: unknown }): React.ReactElement {
+  const message = error instanceof Error ? error.message : String(error)
   return (
     <div className={styles.error}>
       <h2>Something went wrong</h2>
-      <pre>{error.message}</pre>
+      <pre>{message}</pre>
     </div>
   )
 }

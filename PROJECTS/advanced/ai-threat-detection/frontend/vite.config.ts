@@ -12,9 +12,7 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, path.resolve(__dirname, '..'), '')
   const isDev = mode === 'development'
   const apiTarget =
-    process.env.VITE_API_TARGET ||
-    env.VITE_API_TARGET ||
-    'http://localhost:8000'
+    process.env.VITE_API_TARGET || env.VITE_API_TARGET || 'http://localhost:8000'
 
   return {
     plugins: [react(), tsconfigPaths()],

@@ -3,7 +3,7 @@
 // routers.tsx
 // ===================
 
-import { Navigate, createBrowserRouter, type RouteObject } from 'react-router-dom'
+import { createBrowserRouter, Navigate, type RouteObject } from 'react-router-dom'
 import { ROUTES } from '@/config'
 import { Shell } from './shell'
 

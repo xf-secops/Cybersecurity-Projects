@@ -26,9 +26,7 @@ function ModelCard({ model }: { model: ActiveModel }): React.ReactElement {
         {model.threshold !== null && (
           <div className={styles.stat}>
             <span className={styles.statLabel}>Threshold</span>
-            <span className={styles.statValue}>
-              {model.threshold.toFixed(4)}
-            </span>
+            <span className={styles.statValue}>{model.threshold.toFixed(4)}</span>
           </div>
         )}
       </div>
@@ -77,9 +75,7 @@ export function Component(): React.ReactElement {
           disabled={retrain.isPending}
           onClick={() => retrain.mutate()}
         >
-          <LuRefreshCw
-            className={retrain.isPending ? styles.spinning : ''}
-          />
+          <LuRefreshCw className={retrain.isPending ? styles.spinning : ''} />
           {retrain.isPending ? 'Retraining...' : 'Retrain Models'}
         </button>
       </div>

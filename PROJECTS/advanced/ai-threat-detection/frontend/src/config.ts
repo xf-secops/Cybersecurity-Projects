@@ -26,13 +26,11 @@ export const QUERY_KEYS = {
     ALL: ['threats'] as const,
     LIST: (params: Record<string, unknown>) =>
       [...QUERY_KEYS.THREATS.ALL, 'list', params] as const,
-    BY_ID: (id: string) =>
-      [...QUERY_KEYS.THREATS.ALL, 'detail', id] as const,
+    BY_ID: (id: string) => [...QUERY_KEYS.THREATS.ALL, 'detail', id] as const,
   },
   STATS: {
     ALL: ['stats'] as const,
-    BY_RANGE: (range: string) =>
-      [...QUERY_KEYS.STATS.ALL, range] as const,
+    BY_RANGE: (range: string) => [...QUERY_KEYS.STATS.ALL, range] as const,
   },
   MODELS: {
     ALL: ['models'] as const,

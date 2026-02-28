@@ -3,8 +3,8 @@
 // index.tsx
 // ===================
 
-import { useStats, useModelStatus, useAlerts } from '@/api/hooks'
-import { StatCard, AlertFeed } from '@/components'
+import { useAlerts, useModelStatus, useStats } from '@/api/hooks'
+import { AlertFeed, StatCard } from '@/components'
 import styles from './dashboard.module.scss'
 
 function SeverityBar({
@@ -106,14 +106,8 @@ export function Component(): React.ReactElement {
   return (
     <div className={styles.page}>
       <div className={styles.statRow}>
-        <StatCard
-          label="Threats Detected"
-          value={stats.threats_detected}
-        />
-        <StatCard
-          label="Threats Stored"
-          value={stats.threats_stored}
-        />
+        <StatCard label="Threats Detected" value={stats.threats_detected} />
+        <StatCard label="Threats Stored" value={stats.threats_stored} />
         <StatCard
           label="High Severity"
           value={sb.high}
@@ -122,9 +116,7 @@ export function Component(): React.ReactElement {
         <StatCard
           label="Detection Mode"
           value={modelStatus?.detection_mode ?? '...'}
-          sublabel={
-            modelStatus?.models_loaded ? 'Models loaded' : 'Rules only'
-          }
+          sublabel={modelStatus?.models_loaded ? 'Models loaded' : 'Rules only'}
         />
       </div>
 
@@ -134,11 +126,7 @@ export function Component(): React.ReactElement {
       </div>
 
       <div className={styles.bottomRow}>
-        <AlertFeed
-          alerts={alerts}
-          isConnected={isConnected}
-          maxHeight="360px"
-        />
+        <AlertFeed alerts={alerts} isConnected={isConnected} maxHeight="360px" />
 
         <div className={styles.lists}>
           <RankedList
@@ -158,9 +146,7 @@ export function Component(): React.ReactElement {
         </div>
       </div>
 
-      {connectionError && (
-        <div className={styles.wsError}>{connectionError}</div>
-      )}
+      {connectionError && <div className={styles.wsError}>{connectionError}</div>}
     </div>
   )
 }

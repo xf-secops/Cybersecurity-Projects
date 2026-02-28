@@ -121,9 +121,7 @@ export function Component(): React.ReactElement {
 
       <div className={styles.pagination}>
         <span className={styles.paginationInfo}>
-          {total === 0
-            ? 'No results'
-            : `${offset + 1}–${showing} of ${total}`}
+          {total === 0 ? 'No results' : `${offset + 1}–${showing} of ${total}`}
         </span>
         <div className={styles.paginationButtons}>
           <button
