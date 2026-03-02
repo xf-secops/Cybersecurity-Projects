@@ -49,7 +49,7 @@ async def get_stats(
     sev_rows = (await session.execute(sev_q)).all()
     sev_map = {row[0]: row[1] for row in sev_rows}
 
-    threats_detected = sev_map.get("HIGH", 0) + sev_map.get("MEDIUM", 0)
+    threats_detected = total
 
     ip_q = (
         select(ThreatEvent.source_ip,

@@ -18,6 +18,16 @@ function formatTime(timestamp: string): string {
   return new Date(timestamp).toLocaleTimeString()
 }
 
+const METHOD_STYLES: Record<string, string> = {
+  GET: styles.methodGet,
+  POST: styles.methodPost,
+  PUT: styles.methodPut,
+  DELETE: styles.methodDelete,
+  PATCH: styles.methodPatch,
+  HEAD: styles.methodHead,
+  OPTIONS: styles.methodOptions,
+}
+
 export function AlertFeed({
   alerts,
   isConnected,
@@ -51,9 +61,17 @@ export function AlertFeed({
           <div className={styles.empty}>Waiting for alerts...</div>
         ) : (
           alerts.map((alert, i) => (
-            <div key={`${alert.timestamp}-${i}`} className={styles.row}>
+            <div
+              key={alert.id ?? `${alert.timestamp}-${i}`}
+              className={styles.row}
+            >
               <span className={styles.time}>{formatTime(alert.timestamp)}</span>
               <span className={styles.ip}>{alert.source_ip}</span>
+              <span
+                className={`${styles.method} ${METHOD_STYLES[alert.request_method] ?? ''}`}
+              >
+                {alert.request_method}
+              </span>
               <span className={styles.path}>{alert.request_path}</span>
               <SeverityBadge
                 severity={alert.severity as 'HIGH' | 'MEDIUM' | 'LOW'}

@@ -42,8 +42,14 @@ async def _write_metadata(
         create_async_engine,
     )
 
+    from app.models import model_metadata as _reg  # noqa: F401
+    from sqlmodel import SQLModel
+
     engine = create_async_engine(settings.database_url)
     try:
+        async with engine.begin() as conn:
+            await conn.run_sync(SQLModel.metadata.create_all)
+
         factory = async_sessionmaker(
             engine,
             class_=AsyncSession,

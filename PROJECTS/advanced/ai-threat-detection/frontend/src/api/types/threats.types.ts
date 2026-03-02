@@ -22,7 +22,7 @@ export const ThreatEventSchema = z.object({
   response_size: z.number().int(),
   user_agent: z.string(),
   threat_score: z.number(),
-  severity: z.literal(['HIGH', 'MEDIUM', 'LOW']),
+  severity: z.enum(['HIGH', 'MEDIUM', 'LOW']),
   component_scores: z.record(z.string(), z.number()),
   geo: GeoInfoSchema,
   matched_rules: z.array(z.string()).nullable(),

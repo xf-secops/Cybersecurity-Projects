@@ -5,7 +5,6 @@ orchestrator.py
 
 import json
 import logging
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -135,13 +134,8 @@ class TrainingOrchestrator:
                     "ensemble_roc_auc": ensemble.roc_auc,
                 })
                 passed = ensemble.passed_gates
-            except Exception as exc:
+            except Exception:
                 logger.exception("Ensemble validation failed")
-                print(
-                    f"  WARNING: validation raised"
-                    f" {type(exc).__name__}: {exc}",
-                    file=sys.stderr,
-                )
                 ensemble = None
                 passed = False
 

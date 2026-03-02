@@ -68,7 +68,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.detection_mode = "hybrid" if app.state.models_loaded else "rules"
 
     pipeline = Pipeline(
-        redis_client=redis_client,  # type: ignore[arg-type]
+        redis_client=redis_client,
         rule_engine=RuleEngine(),
         geoip=geoip,
         on_result=dispatcher.dispatch,

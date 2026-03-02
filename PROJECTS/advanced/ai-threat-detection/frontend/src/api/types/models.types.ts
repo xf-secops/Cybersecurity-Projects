@@ -9,7 +9,7 @@ export const ActiveModelSchema = z.object({
   model_type: z.string(),
   version: z.string(),
   training_samples: z.number().int(),
-  metrics: z.record(z.string(), z.number()),
+  metrics: z.record(z.string(), z.unknown()),
   threshold: z.number().nullable(),
 })
 

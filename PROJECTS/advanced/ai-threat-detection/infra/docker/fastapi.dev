@@ -1,6 +1,5 @@
 # ©AngelaMos | 2026
-# Development FastAPI Dockerfile
-# Hot reload with uvicorn, volume mounts for code
+# fastapi.dev
 
 FROM python:3.14-slim
 
@@ -19,10 +18,14 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 COPY backend/pyproject.toml ./
-RUN uv pip install --system -e .[dev]
+RUN uv pip install --system -e ".[dev,ml]"
 
 COPY backend/ .
+COPY infra/docker/entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh && \
+    mkdir -p /app/data/models
 
 EXPOSE 8000
 
+ENTRYPOINT ["/app/entrypoint.sh"]
 CMD ["uvicorn", "app.factory:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000", "--reload"]

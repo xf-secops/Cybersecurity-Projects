@@ -18,6 +18,7 @@ from app.core.features.patterns import (
     XSS,
 )
 from app.core.features.signatures import SCANNER_USER_AGENTS
+from app.core.detection.ensemble import classify_severity as _classify_severity
 from app.core.ingestion.parsers import ParsedLogEntry
 
 
@@ -72,17 +73,6 @@ class RuleResult:
     severity: str
     matched_rules: list[str] = field(default_factory=list)
     component_scores: dict[str, float] = field(default_factory=dict)
-
-
-def _classify_severity(score: float) -> str:
-    """
-    Map a threat score to a severity label.
-    """
-    if score >= 0.7:
-        return "HIGH"
-    if score >= 0.5:
-        return "MEDIUM"
-    return "LOW"
 
 
 class RuleEngine:

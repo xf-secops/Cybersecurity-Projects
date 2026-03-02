@@ -50,7 +50,7 @@
 
 .row {
   display: grid;
-  grid-template-columns: 80px 130px 1fr auto 60px;
+  grid-template-columns: 80px 130px 48px 1fr auto 60px;
   gap: $space-3;
   align-items: center;
   padding: $space-2-5 $space-5;
@@ -84,6 +84,22 @@
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
+
+.method {
+  font-family: monospace;
+  font-weight: $font-weight-semibold;
+  font-size: $font-size-2xs;
+  letter-spacing: $tracking-wide;
+  color: $text-lighter;
+}
+
+.methodGet { color: $method-get; }
+.methodPost { color: $method-post; }
+.methodPut { color: $method-put; }
+.methodDelete { color: $method-delete; }
+.methodPatch { color: $method-patch; }
+.methodHead { color: $method-head; }
+.methodOptions { color: $method-options; }
 
 .empty {
   padding: $space-10;

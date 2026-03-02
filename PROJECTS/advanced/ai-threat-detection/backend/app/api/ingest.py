@@ -5,8 +5,10 @@ ingest.py
 
 import asyncio
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
+
+from app.api.deps import require_api_key
 
 router = APIRouter(prefix="/ingest", tags=["ingest"])
 
@@ -19,7 +21,7 @@ class BatchIngestRequest(BaseModel):
     lines: list[str]
 
 
-@router.post("/batch", status_code=200)
+@router.post("/batch", status_code=200, dependencies=[Depends(require_api_key)])
 async def ingest_batch(
     body: BatchIngestRequest,
     request: Request,

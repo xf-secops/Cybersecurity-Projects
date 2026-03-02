@@ -1,0 +1,22 @@
+// ===================
+// © AngelaMos | 2026
+// method-badge.module.scss
+// ===================
+
+@use '@/styles/tokens' as *;
+
+.badge {
+  font-family: monospace;
+  font-weight: $font-weight-semibold;
+  font-size: $font-size-2xs;
+  letter-spacing: $tracking-wide;
+  color: $text-lighter;
+}
+
+.get { color: $method-get; }
+.post { color: $method-post; }
+.put { color: $method-put; }
+.delete { color: $method-delete; }
+.patch { color: $method-patch; }
+.head { color: $method-head; }
+.options { color: $method-options; }

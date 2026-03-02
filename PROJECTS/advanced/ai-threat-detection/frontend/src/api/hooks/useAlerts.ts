@@ -62,7 +62,7 @@ export function useAlerts() {
       ws.onmessage = (event) => {
         const parsed = WebSocketAlertSchema.safeParse(JSON.parse(event.data))
         if (parsed.success) {
-          addAlert(parsed.data)
+          addAlert({ ...parsed.data, id: crypto.randomUUID() })
         }
       }
 

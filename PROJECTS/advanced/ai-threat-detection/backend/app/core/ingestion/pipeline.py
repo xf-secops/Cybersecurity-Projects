@@ -81,7 +81,7 @@ class Pipeline:
 
     def __init__(
         self,
-        redis_client: aioredis.Redis[bytes],
+        redis_client: aioredis.Redis[str],
         rule_engine: RuleEngine,
         geoip: GeoIPService | None = None,
         on_result: (Callable[[ScoredRequest], Awaitable[None]] | None) = None,

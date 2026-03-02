@@ -19,7 +19,7 @@ def _hash_member(value: str) -> str:
     """
     Produce a compact 16-char hex digest for sorted set deduplication.
     """
-    return hashlib.md5(value.encode()).hexdigest()[:16]
+    return hashlib.md5(value.encode(), usedforsecurity=False).hexdigest()[:16]
 
 
 class WindowAggregator:
@@ -27,7 +27,7 @@ class WindowAggregator:
     Per-IP sliding window feature aggregator backed by Redis sorted sets.
     """
 
-    def __init__(self, redis_client: aioredis.Redis[bytes]) -> None:
+    def __init__(self, redis_client: aioredis.Redis[str]) -> None:
         self._redis = redis_client
 
     async def record_and_aggregate(
@@ -91,17 +91,18 @@ class WindowAggregator:
 
         results = await pipe.execute()
 
-        read_start = len(keys) * 2
-        req_count_1m = results[read_start]
-        req_count_5m = results[read_start + 1]
-        req_count_10m = results[read_start + 2]
-        unique_paths_5m = results[read_start + 3]
-        unique_uas_10m = results[read_start + 4]
-        statuses_5m = results[read_start + 5]
-        sizes_5m = results[read_start + 6]
-        methods_5m = results[read_start + 7]
-        depths_5m = results[read_start + 8]
-        requests_with_scores = results[read_start + 9]
+        (
+            _zadd_req, _zadd_paths, _zadd_statuses, _zadd_uas,
+            _zadd_sizes, _zadd_methods, _zadd_depths,
+            _trim_req, _trim_paths, _trim_statuses, _trim_uas,
+            _trim_sizes, _trim_methods, _trim_depths,
+            req_count_1m, req_count_5m, req_count_10m,
+            unique_paths_5m, unique_uas_10m,
+            statuses_5m, sizes_5m, methods_5m, depths_5m,
+            requests_with_scores,
+            _exp_req, _exp_paths, _exp_statuses, _exp_uas,
+            _exp_sizes, _exp_methods, _exp_depths,
+        ) = results
 
         irt_mean, irt_std = _inter_request_time_stats(requests_with_scores)
 

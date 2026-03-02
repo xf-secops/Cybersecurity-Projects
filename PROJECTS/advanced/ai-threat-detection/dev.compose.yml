@@ -42,7 +42,7 @@ services:
   backend:
     build:
       context: .
-      dockerfile: infra/docker/fastapi.prod
+      dockerfile: infra/docker/fastapi.dev
     container_name: vigil-backend-dev
     environment:
       ENV: development
@@ -53,9 +53,13 @@ services:
       REDIS_URL: redis://redis:6379
       NGINX_LOG_PATH: /var/log/nginx/access.log
       GEOIP_DB_PATH: /usr/share/GeoIP/GeoLite2-City.mmdb
+      GIT_PYTHON_REFRESH: quiet
+      MODEL_DIR: /app/data/models
+      SKIP_AUTO_TRAIN: ${SKIP_AUTO_TRAIN:-false}
     ports:
       - "${BACKEND_HOST_PORT:-36969}:8000"
     volumes:
+      - model_data_dev:/app/data/models
       - nginx_logs_dev:/var/log/nginx
     depends_on:
       postgres:
@@ -69,7 +73,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 3
-      start_period: 15s
+      start_period: 180s
 
   frontend:
     build:
@@ -96,5 +100,7 @@ networks:
 volumes:
   postgres_dev:
   redis_dev:
+  model_data_dev:
   nginx_logs_dev:
+    name: vigil_dev_nginx_logs
   frontend_node_modules_dev:

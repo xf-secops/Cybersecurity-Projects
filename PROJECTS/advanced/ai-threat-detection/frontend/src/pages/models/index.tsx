@@ -34,12 +34,16 @@ function ModelCard({ model }: { model: ActiveModel }): React.ReactElement {
       {Object.keys(model.metrics).length > 0 && (
         <div className={styles.metrics}>
           <span className={styles.metricsTitle}>Metrics</span>
-          {Object.entries(model.metrics).map(([key, val]) => (
-            <div key={key} className={styles.metricRow}>
-              <span className={styles.metricKey}>{key}</span>
-              <span className={styles.metricVal}>{val.toFixed(4)}</span>
-            </div>
-          ))}
+          {Object.entries(model.metrics)
+            .filter(([, val]) => typeof val === 'number')
+            .map(([key, val]) => (
+              <div key={key} className={styles.metricRow}>
+                <span className={styles.metricKey}>{key}</span>
+                <span className={styles.metricVal}>
+                  {(val as number).toFixed(4)}
+                </span>
+              </div>
+            ))}
         </div>
       )}
     </div>

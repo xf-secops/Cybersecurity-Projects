@@ -5,6 +5,7 @@
 
 import { useQuery } from '@tanstack/react-query'
 import type { ThreatEvent, ThreatList } from '@/api/types'
+import { ThreatEventSchema, ThreatListSchema } from '@/api/types'
 import { API_ENDPOINTS, PAGINATION, QUERY_KEYS } from '@/config'
 import { apiClient, QUERY_STRATEGIES } from '@/core/api'
 
@@ -27,11 +28,10 @@ export function useThreats(params: ThreatParams = {}) {
   return useQuery<ThreatList>({
     queryKey: QUERY_KEYS.THREATS.LIST(queryParams),
     queryFn: async () => {
-      const { data } = await apiClient.get<ThreatList>(
-        API_ENDPOINTS.THREATS.LIST,
-        { params: queryParams }
-      )
-      return data
+      const { data } = await apiClient.get<unknown>(API_ENDPOINTS.THREATS.LIST, {
+        params: queryParams,
+      })
+      return ThreatListSchema.parse(data)
     },
     ...QUERY_STRATEGIES.frequent,
   })
@@ -41,10 +41,10 @@ export function useThreat(id: string | null) {
   return useQuery<ThreatEvent>({
     queryKey: QUERY_KEYS.THREATS.BY_ID(id ?? ''),
     queryFn: async () => {
-      const { data } = await apiClient.get<ThreatEvent>(
+      const { data } = await apiClient.get<unknown>(
         API_ENDPOINTS.THREATS.BY_ID(id as string)
       )
-      return data
+      return ThreatEventSchema.parse(data)
     },
     enabled: id !== null,
     ...QUERY_STRATEGIES.standard,

@@ -17,6 +17,7 @@ class WebSocketAlert(BaseModel):
     event: Literal["threat"] = "threat"
     timestamp: datetime
     source_ip: str
+    request_method: str
     request_path: str
     threat_score: float
     severity: str

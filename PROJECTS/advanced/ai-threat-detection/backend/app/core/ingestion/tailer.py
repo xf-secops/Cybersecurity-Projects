@@ -15,7 +15,7 @@ from watchdog.events import (
     FileMovedEvent,
     FileSystemEventHandler,
 )
-from watchdog.observers import Observer
+from watchdog.observers.polling import PollingObserver
 
 logger = logging.getLogger(__name__)
 
@@ -171,7 +171,7 @@ class LogTailer:
     ) -> None:
         self._log_path = log_path
         self._handler = _LogHandler(log_path, queue, loop)
-        self._observer = Observer()
+        self._observer = PollingObserver(timeout=2)
         self._started = False
 
     def start(self) -> None:

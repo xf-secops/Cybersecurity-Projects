@@ -21,7 +21,10 @@ $header-height: 56px;
   left: 0;
   bottom: 0;
   width: $sidebar-width;
-  background: $bg-surface-100;
+  background:
+    radial-gradient(circle, $border-default 1px, transparent 1px),
+    $bg-surface-100;
+  background-size: 24px 24px, auto;
   border-right: 1px solid $border-default;
   display: flex;
   flex-direction: column;
@@ -107,6 +110,12 @@ $header-height: 56px;
   width: 17px;
   height: 17px;
   flex-shrink: 0;
+  color: $severity-high;
+  opacity: 0.7;
+
+  .navItem.active & {
+    opacity: 1;
+  }
 }
 
 .navLabel {
@@ -127,7 +136,8 @@ $header-height: 56px;
   width: 45px;
   height: 45px;
   border-radius: $radius-md;
-  color: $text-light;
+  color: $severity-high;
+  opacity: 0.6;
   @include flex-center;
   @include transition-fast;
 
@@ -138,7 +148,7 @@ $header-height: 56px;
 
   @include hover {
     background: $bg-surface-200;
-    color: $text-default;
+    opacity: 1;
   }
 
   @include breakpoint-down('sm') {
@@ -226,7 +236,10 @@ $header-height: 56px;
   position: sticky;
   top: 0;
   height: $header-height;
-  background: $bg-surface-100;
+  background:
+    radial-gradient(circle, $border-default 1px, transparent 1px),
+    $bg-surface-100;
+  background-size: 24px 24px, auto;
   border-bottom: 1px solid $border-default;
   z-index: $z-sticky;
   display: flex;

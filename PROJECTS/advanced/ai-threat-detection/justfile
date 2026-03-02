@@ -280,6 +280,38 @@ clean:
     -rm -rf backend/.coverage
     @echo "Cache directories cleaned"
 
+# =============================================================================
+# Dev-Log (target app for realistic log generation)
+# =============================================================================
+
+[group('devlog')]
+devlog-up *ARGS:
+    cd dev-log && docker compose up -d {{ARGS}}
+
+[group('devlog')]
+devlog-down *ARGS:
+    cd dev-log && docker compose down {{ARGS}}
+
+[group('devlog')]
+devlog-build:
+    cd dev-log && docker compose build
+
+[group('devlog')]
+devlog-logs:
+    cd dev-log && docker compose logs -f
+
+[group('devlog')]
+devlog-simulate mode='mixed' count='100' delay='0.1':
+    python dev-log/simulate.py {{mode}} -n {{count}} -d {{delay}}
+
+[group('devlog')]
+devlog-normal count='200':
+    python dev-log/simulate.py normal -n {{count}} -d 0.05
+
+[group('devlog')]
+devlog-attack count='50':
+    python dev-log/simulate.py mixed -n {{count}} -d 0.1
+
 [group('util')]
 [confirm("Remove all containers, volumes, and build artifacts?")]
 nuke:

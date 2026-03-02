@@ -6,7 +6,7 @@
 import { useState } from 'react'
 import { useThreats } from '@/api/hooks'
 import type { ThreatEvent } from '@/api/types'
-import { SeverityBadge, ThreatDetail } from '@/components'
+import { MethodBadge, SeverityBadge, ThreatDetail } from '@/components'
 import { PAGINATION } from '@/config'
 import styles from './threats.module.scss'
 
@@ -103,7 +103,9 @@ export function Component(): React.ReactElement {
                     {formatTime(threat.created_at)}
                   </td>
                   <td className={styles.monoCell}>{threat.source_ip}</td>
-                  <td>{threat.request_method}</td>
+                  <td>
+                    <MethodBadge method={threat.request_method} />
+                  </td>
                   <td className={styles.pathCell}>{threat.request_path}</td>
                   <td className={styles.scoreCell}>
                     {threat.threat_score.toFixed(3)}

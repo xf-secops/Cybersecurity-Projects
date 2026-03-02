@@ -106,11 +106,11 @@ $text-light: hsl(0, 0%, 70.6%);
 $text-lighter: hsl(0, 0%, 53.7%);
 $text-muted: hsl(0, 0%, 30.2%);
 
-$error-default: hsl(0, 72%, 51%);
-$error-light: hsl(0, 72%, 65%);
+$error-default: hsl(0, 72%, 44%);
+$error-light: hsl(0, 72%, 58%);
 
-$severity-high: hsl(0, 72%, 51%);
-$severity-high-bg: hsl(0, 72%, 15%);
+$severity-high: hsl(0, 72%, 44%);
+$severity-high-bg: hsl(0, 72%, 13%);
 $severity-medium: hsl(38, 92%, 50%);
 $severity-medium-bg: hsl(38, 92%, 15%);
 $severity-low: hsl(142, 71%, 45%);
@@ -118,6 +118,14 @@ $severity-low-bg: hsl(142, 71%, 15%);
 
 $accent: hsl(217, 91%, 60%);
 $accent-muted: hsl(217, 91%, 20%);
+
+$method-get: hsl(142, 60%, 45%);
+$method-post: hsl(217, 80%, 55%);
+$method-put: hsl(38, 80%, 50%);
+$method-delete: hsl(0, 72%, 44%);
+$method-patch: hsl(270, 60%, 55%);
+$method-head: hsl(190, 50%, 50%);
+$method-options: hsl(30, 50%, 50%);
 
 $success: hsl(142, 71%, 45%);
 $success-bg: hsl(142, 71%, 15%);

@@ -4,9 +4,10 @@ data_loader.py
 """
 
 import logging
+import random
 import re
 from dataclasses import dataclass
-from datetime import datetime, UTC
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import numpy as np
@@ -26,6 +27,17 @@ _DEFAULT_IP = "192.168.1.100"
 
 _DEFAULT_UA = ("Mozilla/5.0 (compatible; Konqueror/3.5; Linux)"
                " KHTML/3.5.8 (like Gecko)")
+
+_BASE_TIMESTAMP = datetime(2010, 6, 1, tzinfo=UTC)
+_TRAINING_WINDOW_DAYS = 90
+
+
+def _synthetic_timestamp() -> datetime:
+    """
+    Generate a realistic training timestamp spread over 90 days
+    """
+    offset_secs = random.randint(0, _TRAINING_WINDOW_DAYS * 86400)
+    return _BASE_TIMESTAMP + timedelta(seconds=offset_secs)
 
 
 @dataclass
@@ -146,7 +158,7 @@ def csic_to_parsed_entry(req: CSICRequest) -> ParsedLogEntry:
 
     return ParsedLogEntry(
         ip=_DEFAULT_IP,
-        timestamp=datetime.now(UTC),
+        timestamp=_synthetic_timestamp(),
         method=req.method,
         path=req.path,
         query_string=query,

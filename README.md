@@ -20,14 +20,16 @@
   </a>
 </div>
 
+<p align="center">Made possible by <a href="https://certgames.com"><strong>CertGames</strong></a></p>
+
 <h2 align="center"><strong>View Complete Projects:</strong></h2>
 <div align="center">
   <a href="https://github.com/CarterPerez-dev/Cybersecurity-Projects/tree/main/PROJECTS">
-    <img src="https://img.shields.io/badge/Full_Source_Code-16/60-blue?style=for-the-badge&logo=github" alt="Projects"/>
+    <img src="https://img.shields.io/badge/Full_Source_Code-17/60-blue?style=for-the-badge&logo=github" alt="Projects"/>
   </a>
 </div>
 
-<p align="center"><sub><em>Currently building: <a href="./SYNOPSES/advanced/AI.Threat.Detection.md">AI Threat Detection</a></em></sub></p>
+<p align="center"><sub><em>Currently building: <a href="./SYNOPSES/beginner/Hash.Cracker.md">Hash Cracker</a></em></sub></p>
 
 ---
 
@@ -105,7 +107,7 @@ Tools, courses, certifications, communities, and frameworks for cybersecurity pr
 | **[API Rate Limiter](./PROJECTS/advanced/api-rate-limiter)**<br>Distributed rate limiting middleware | ![1w](https://img.shields.io/badge/⏱️_1w-blue) ![Python](https://img.shields.io/badge/Python-3776AB?logo=python&logoColor=white) ![Redis](https://img.shields.io/badge/Redis-DC382D?logo=redis&logoColor=white) ![Advanced](https://img.shields.io/badge/●_Advanced-red) | Token bucket algorithm • Distributed systems • Redis backend<br>[Source Code](./PROJECTS/advanced/api-rate-limiter) \| [Docs](./PROJECTS/advanced/api-rate-limiter/learn) |
 | **[Encrypted Chat Application](./PROJECTS/advanced/encrypted-p2p-chat)**<br>Real-time E2EE messaging | ![1-2w](https://img.shields.io/badge/⏱️_1--2w-blue) ![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi) ![SolidJS](https://img.shields.io/badge/SolidJS-2C4F7C?logo=solid) ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-4169E1?logo=postgresql&logoColor=white) ![Advanced](https://img.shields.io/badge/●_Advanced-red) | Signal Protocol • Double Ratchet • WebAuthn • WebSockets<br>[Source Code](./PROJECTS/advanced/encrypted-p2p-chat) \| [Docs](./PROJECTS/advanced/encrypted-p2p-chat/learn) |
 | **[Exploit Development Framework](./SYNOPSES/advanced/Exploit.Development.Framework.md)**<br>Modular exploitation framework | ![3-4w](https://img.shields.io/badge/⏱️_3--4w-blue) ![C++](https://img.shields.io/badge/C%2B%2B-00599C?logo=cplusplus&logoColor=white) ![Advanced](https://img.shields.io/badge/●_Advanced-red) | Exploit development • Payload generation • Plugin architecture<br>[Learn More](./SYNOPSES/advanced/Exploit.Development.Framework.md) |
-| **[AI Threat Detection](./SYNOPSES/advanced/AI.Threat.Detection.md)**<br>ML-based traffic classification | ![3-4w](https://img.shields.io/badge/⏱️_3--4w-blue) ![Python](https://img.shields.io/badge/Python-3776AB?logo=python&logoColor=white) ![TensorFlow](https://img.shields.io/badge/TensorFlow-FF6F00?logo=tensorflow&logoColor=white) ![Advanced](https://img.shields.io/badge/●_Advanced-red) | Machine learning • Network traffic analysis • Model deployment<br>[Learn More](./SYNOPSES/advanced/AI.Threat.Detection.md) |
+| **[AI Threat Detection](./PROJECTS/advanced/ai-threat-detection)**<br>ML-powered nginx threat detection | ![3-4w](https://img.shields.io/badge/⏱️_3--4w-blue) ![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi) ![React](https://img.shields.io/badge/React-61DAFB?logo=react&logoColor=black) ![PyTorch](https://img.shields.io/badge/PyTorch-EE4C2C?logo=pytorch&logoColor=white) ![Advanced](https://img.shields.io/badge/●_Advanced-red) | ML ensemble (AE + RF + IF) • ONNX inference • Real-time detection<br>[Source Code](./PROJECTS/advanced/ai-threat-detection) |
 | **[Bug Bounty Platform](./PROJECTS/advanced/bug-bounty-platform)**<br>Full vulnerability disclosure platform | ![2-3w](https://img.shields.io/badge/⏱️_2--3w-blue) ![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi) ![React](https://img.shields.io/badge/React-61DAFB?logo=react&logoColor=black) ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-4169E1?logo=postgresql&logoColor=white) ![Advanced](https://img.shields.io/badge/●_Advanced-red) | Full-stack development • CVSS scoring • Workflow automation<br>[Source Code](./PROJECTS/advanced/bug-bounty-platform) \| [Docs](./PROJECTS/advanced/bug-bounty-platform/learn) |
 | **[Cloud Security Posture Management](./SYNOPSES/advanced/Cloud.Security.Posture.Management.md)**<br>Multi-cloud misconfiguration scanner | ![2-3w](https://img.shields.io/badge/⏱️_2--3w-blue) ![Go](https://img.shields.io/badge/Go-00ADD8?logo=go&logoColor=white) ![AWS](https://img.shields.io/badge/AWS-232F3E?logo=amazonaws) ![Azure](https://img.shields.io/badge/Azure-0078D4?logo=microsoftazure) ![Advanced](https://img.shields.io/badge/●_Advanced-red) | Cloud security • CIS benchmarks • Multi-cloud APIs<br>[Learn More](./SYNOPSES/advanced/Cloud.Security.Posture.Management.md) |
 | **[Malware Analysis Platform](./SYNOPSES/advanced/Malware.Analysis.Platform.md)**<br>Automated sandbox analysis | ![2-3w](https://img.shields.io/badge/⏱️_2--3w-blue) ![Rust](https://img.shields.io/badge/Rust-000000?logo=rust&logoColor=white) ![Docker](https://img.shields.io/badge/Docker-2496ED?logo=docker&logoColor=white) ![Advanced](https://img.shields.io/badge/●_Advanced-red) | Malware analysis • Sandboxing • YARA rules • IOC extraction<br>[Learn More](./SYNOPSES/advanced/Malware.Analysis.Platform.md) |

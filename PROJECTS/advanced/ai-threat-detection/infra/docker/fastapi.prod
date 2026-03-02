@@ -1,6 +1,5 @@
 # ©AngelaMos | 2026
-# Production FastAPI Dockerfile
-# Multi-stage build, single uvicorn worker (pipeline runs in-process)
+# fastapi.prod
 
 FROM python:3.14-slim AS builder
 
@@ -18,7 +17,7 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 COPY backend/pyproject.toml ./
-RUN uv pip compile pyproject.toml -o requirements.txt && \
+RUN uv pip compile pyproject.toml --extra ml -o requirements.txt && \
     uv pip install --target /app/deps -r requirements.txt
 
 FROM python:3.14-slim
@@ -37,14 +36,17 @@ ENV PYTHONPATH=/home/appuser/.local/lib/python3.14/site-packages:$PYTHONPATH \
     PATH=/home/appuser/.local/lib/python3.14/site-packages/bin:$PATH
 
 COPY backend/ .
+COPY infra/docker/entrypoint.sh /app/entrypoint.sh
 
 RUN mkdir -p /app/data/models && \
+    chmod +x /app/entrypoint.sh && \
     chown -R appuser:appuser /app
 USER appuser
 
 EXPOSE 8000
 
-HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=10s --start-period=180s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
+ENTRYPOINT ["/app/entrypoint.sh"]
 CMD ["uvicorn", "app.factory:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000"]

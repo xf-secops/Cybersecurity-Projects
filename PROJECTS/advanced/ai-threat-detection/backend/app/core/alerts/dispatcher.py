@@ -80,6 +80,7 @@ class AlertDispatcher:
         alert = WebSocketAlert(
             timestamp=scored.entry.timestamp,
             source_ip=scored.entry.ip,
+            request_method=scored.entry.method,
             request_path=scored.entry.path,
             threat_score=scored.final_score,
             severity=severity,
