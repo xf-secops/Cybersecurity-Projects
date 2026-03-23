@@ -12,8 +12,8 @@
 #include <vector>
 
 struct SharedState {
-    std::atomic<bool> found{false};
-    std::atomic<std::size_t> tested_count{0};
+    alignas(64) std::atomic<bool> found{false};
+    alignas(64) std::atomic<std::size_t> tested_count{0};
     std::mutex result_mutex;
     std::optional<std::string> result;
 

@@ -96,6 +96,7 @@ auto Engine::crack(const CrackConfig& cfg)
         auto attack = create_attack();
         if (!attack.has_value()) { return; }
 
+        std::size_t local_count = 0;
         while (!state.found.load(std::memory_order_relaxed)) {
             auto candidate = attack->next();
             if (!candidate.has_value()) { break; }
@@ -110,12 +111,18 @@ auto Engine::crack(const CrackConfig& cfg)
             }
 
             if (hasher.hash(to_hash) == cfg.target_hash) {
+                state.tested_count.fetch_add(local_count, std::memory_order_relaxed);
                 state.set_result(std::move(*candidate));
                 break;
             }
 
-            state.tested_count.fetch_add(1, std::memory_order_relaxed);
+            ++local_count;
+            if ((local_count & 0x3FF) == 0) {
+                state.tested_count.fetch_add(local_count, std::memory_order_relaxed);
+                local_count = 0;
+            }
         }
+        state.tested_count.fetch_add(local_count, std::memory_order_relaxed);
     });
 
     if (display_thread.joinable()) {

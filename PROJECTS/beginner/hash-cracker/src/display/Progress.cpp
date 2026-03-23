@@ -8,17 +8,14 @@
 #include <sys/ioctl.h>
 #include <unistd.h>
 
-static auto start_time = std::chrono::steady_clock::now();
-
 Progress::Progress(std::string_view algorithm, std::string_view attack_mode,
                    unsigned thread_count, std::size_t total_candidates,
                    const std::atomic<bool>& found,
                    const std::atomic<std::size_t>& tested)
     : algorithm_(algorithm), attack_mode_(attack_mode),
       thread_count_(thread_count), total_(total_candidates),
-      found_(found), tested_(tested) {
-    start_time = std::chrono::steady_clock::now();
-}
+      found_(found), tested_(tested),
+      start_time_(std::chrono::steady_clock::now()) {}
 
 bool Progress::is_tty() {
     return isatty(STDOUT_FILENO) != 0;
@@ -112,7 +109,7 @@ void Progress::update() {
     if (!is_tty()) { return; }
 
     auto now = std::chrono::steady_clock::now();
-    double elapsed = std::chrono::duration<double>(now - start_time).count();
+    double elapsed = std::chrono::duration<double>(now - start_time_).count();
     auto tested_val = tested_.load(std::memory_order_relaxed);
 
     double fraction = (total_ > 0)
@@ -178,7 +175,7 @@ void Progress::print_exhausted(std::string_view hash,
     }
 
     auto now = std::chrono::steady_clock::now();
-    double elapsed = std::chrono::duration<double>(now - start_time).count();
+    double elapsed = std::chrono::duration<double>(now - start_time_).count();
     auto tested_val = tested_.load(std::memory_order_relaxed);
 
     std::print("\033[3A\033[J");

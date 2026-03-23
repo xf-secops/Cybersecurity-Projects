@@ -4,13 +4,15 @@
 #include "src/rules/RuleSet.hpp"
 #include "src/config/Config.hpp"
 #include <algorithm>
+#include <array>
 #include <cctype>
-#include <unordered_map>
+#include <ranges>
+#include <utility>
 
-static const std::unordered_map<char, char> LEET_MAP = {
+static constexpr std::array<std::pair<char, char>, 6> LEET_MAP = {{
     {'a', '@'}, {'e', '3'}, {'i', '1'},
     {'o', '0'}, {'s', '$'}, {'t', '7'}
-};
+}};
 
 std::generator<std::string> RuleSet::capitalize_first(std::string_view word) {
     if (word.empty()) { co_return; }
@@ -30,10 +32,9 @@ std::generator<std::string> RuleSet::uppercase_all(std::string_view word) {
 std::generator<std::string> RuleSet::leet_speak(std::string_view word) {
     std::string result(word);
     for (auto& c : result) {
-        auto it = LEET_MAP.find(static_cast<char>(
-            std::tolower(static_cast<unsigned char>(c))));
-        if (it != LEET_MAP.end()) {
-            c = it->second;
+        auto lower = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        for (auto [from, to] : LEET_MAP) {
+            if (lower == from) { c = to; break; }
         }
     }
     co_yield std::move(result);
@@ -68,11 +69,11 @@ std::generator<std::string> RuleSet::toggle_case(std::string_view word) {
 }
 
 std::generator<std::string> RuleSet::apply_all(std::string_view word) {
-    for (auto&& s : capitalize_first(word)) { co_yield std::move(s); }
-    for (auto&& s : uppercase_all(word)) { co_yield std::move(s); }
-    for (auto&& s : leet_speak(word)) { co_yield std::move(s); }
-    for (auto&& s : append_digits(word)) { co_yield std::move(s); }
-    for (auto&& s : prepend_digits(word)) { co_yield std::move(s); }
-    for (auto&& s : reverse(word)) { co_yield std::move(s); }
-    for (auto&& s : toggle_case(word)) { co_yield std::move(s); }
+    co_yield std::ranges::elements_of(capitalize_first(word));
+    co_yield std::ranges::elements_of(uppercase_all(word));
+    co_yield std::ranges::elements_of(leet_speak(word));
+    co_yield std::ranges::elements_of(append_digits(word));
+    co_yield std::ranges::elements_of(prepend_digits(word));
+    co_yield std::ranges::elements_of(reverse(word));
+    co_yield std::ranges::elements_of(toggle_case(word));
 }

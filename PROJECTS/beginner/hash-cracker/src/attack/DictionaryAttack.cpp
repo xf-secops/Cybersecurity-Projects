@@ -3,10 +3,6 @@
 
 #include "src/attack/DictionaryAttack.hpp"
 #include <algorithm>
-#include <fcntl.h>
-#include <sys/mman.h>
-#include <sys/stat.h>
-#include <unistd.h>
 
 static std::size_t count_lines_in_range(const char* data,
                                         std::size_t start,
@@ -31,36 +27,16 @@ static std::size_t find_next_newline(const char* data,
 
 std::expected<DictionaryAttack, CrackError> DictionaryAttack::create(
     std::string_view path, unsigned thread_index, unsigned total_threads) {
-    std::string path_str(path);
-    int fd = open(path_str.c_str(), O_RDONLY);
-    if (fd < 0) {
-        return std::unexpected(CrackError::FileNotFound);
+    auto file = MappedFile::open(path);
+    if (!file.has_value()) {
+        return std::unexpected(file.error());
     }
 
-    struct stat sb{};
-    if (fstat(fd, &sb) < 0) {
-        close(fd);
-        return std::unexpected(CrackError::FileNotFound);
-    }
+    auto* data = file->data();
+    auto file_size = file->size();
 
-    auto file_size = static_cast<std::size_t>(sb.st_size);
-    if (file_size == 0) {
-        close(fd);
-        return std::unexpected(CrackError::InvalidConfig);
-    }
-
-    auto* mapped = static_cast<const char*>(
-        mmap(nullptr, file_size, PROT_READ, MAP_PRIVATE, fd, 0));
-
-    if (mapped == MAP_FAILED) {
-        close(fd);
-        return std::unexpected(CrackError::FileNotFound);
-    }
-
-    madvise(const_cast<char*>(mapped), file_size, MADV_SEQUENTIAL);
-
-    std::size_t total_lines = count_lines_in_range(mapped, 0, file_size);
-    if (file_size > 0 && mapped[file_size - 1] != '\n') {
+    std::size_t total_lines = count_lines_in_range(data, 0, file_size);
+    if (file_size > 0 && data[file_size - 1] != '\n') {
         ++total_lines;
     }
 
@@ -74,18 +50,16 @@ std::expected<DictionaryAttack, CrackError> DictionaryAttack::create(
 
     std::size_t start_offset = 0;
     for (std::size_t i = 0; i < my_start_line; ++i) {
-        start_offset = find_next_newline(mapped, start_offset, file_size);
+        start_offset = find_next_newline(data, start_offset, file_size);
     }
 
     std::size_t end_offset = start_offset;
     for (std::size_t i = 0; i < my_line_count; ++i) {
-        end_offset = find_next_newline(mapped, end_offset, file_size);
+        end_offset = find_next_newline(data, end_offset, file_size);
     }
 
     DictionaryAttack attack;
-    attack.mapped_data_ = mapped;
-    attack.file_size_ = file_size;
-    attack.fd_ = fd;
+    attack.file_ = std::move(*file);
     attack.start_offset_ = start_offset;
     attack.end_offset_ = end_offset;
     attack.current_offset_ = start_offset;
@@ -95,73 +69,28 @@ std::expected<DictionaryAttack, CrackError> DictionaryAttack::create(
     return attack;
 }
 
-DictionaryAttack::~DictionaryAttack() {
-    if (mapped_data_ && mapped_data_ != MAP_FAILED) {
-        munmap(const_cast<char*>(mapped_data_), file_size_);
-    }
-    if (fd_ >= 0) {
-        close(fd_);
-    }
-}
-
-DictionaryAttack::DictionaryAttack(DictionaryAttack&& other) noexcept
-    : mapped_data_(other.mapped_data_), file_size_(other.file_size_),
-      fd_(other.fd_), start_offset_(other.start_offset_),
-      end_offset_(other.end_offset_), current_offset_(other.current_offset_),
-      total_words_(other.total_words_), words_read_(other.words_read_) {
-    other.mapped_data_ = nullptr;
-    other.fd_ = -1;
-}
-
-DictionaryAttack& DictionaryAttack::operator=(DictionaryAttack&& other) noexcept {
-    if (this != &other) {
-        if (mapped_data_ && mapped_data_ != MAP_FAILED) {
-            munmap(const_cast<char*>(mapped_data_), file_size_);
-        }
-        if (fd_ >= 0) {
-            close(fd_);
-        }
-
-        mapped_data_ = other.mapped_data_;
-        file_size_ = other.file_size_;
-        fd_ = other.fd_;
-        start_offset_ = other.start_offset_;
-        end_offset_ = other.end_offset_;
-        current_offset_ = other.current_offset_;
-        total_words_ = other.total_words_;
-        words_read_ = other.words_read_;
-
-        other.mapped_data_ = nullptr;
-        other.fd_ = -1;
-    }
-    return *this;
-}
-
 std::expected<std::string, AttackComplete> DictionaryAttack::next() {
-    if (current_offset_ >= end_offset_) {
-        return std::unexpected(AttackComplete{});
+    while (current_offset_ < end_offset_) {
+        std::size_t line_start = current_offset_;
+        std::size_t line_end = line_start;
+
+        while (line_end < end_offset_ && file_.data()[line_end] != '\n') {
+            ++line_end;
+        }
+
+        std::size_t word_end = line_end;
+        if (word_end > line_start && file_.data()[word_end - 1] == '\r') {
+            --word_end;
+        }
+
+        current_offset_ = (line_end < end_offset_) ? line_end + 1 : end_offset_;
+        ++words_read_;
+
+        if (word_end > line_start) {
+            return std::string(file_.data() + line_start, word_end - line_start);
+        }
     }
-
-    std::size_t line_start = current_offset_;
-    std::size_t line_end = line_start;
-
-    while (line_end < end_offset_ && mapped_data_[line_end] != '\n') {
-        ++line_end;
-    }
-
-    std::size_t word_end = line_end;
-    if (word_end > line_start && mapped_data_[word_end - 1] == '\r') {
-        --word_end;
-    }
-
-    current_offset_ = (line_end < end_offset_) ? line_end + 1 : end_offset_;
-    ++words_read_;
-
-    if (word_end <= line_start) {
-        return next();
-    }
-
-    return std::string(mapped_data_ + line_start, word_end - line_start);
+    return std::unexpected(AttackComplete{});
 }
 
 std::size_t DictionaryAttack::total() const { return total_words_; }

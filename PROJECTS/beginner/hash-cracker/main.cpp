@@ -63,6 +63,22 @@ static auto dispatch_hasher(HashType type, const CrackConfig& cfg)
     return std::unexpected(CrackError::UnsupportedAlgorithm);
 }
 
+static std::string json_escape(std::string_view s) {
+    std::string result;
+    result.reserve(s.size());
+    for (char c : s) {
+        switch (c) {
+            case '"':  result += "\\\""; break;
+            case '\\': result += "\\\\"; break;
+            case '\n': result += "\\n";  break;
+            case '\r': result += "\\r";  break;
+            case '\t': result += "\\t";  break;
+            default:   result += c;      break;
+        }
+    }
+    return result;
+}
+
 static void write_json_result(const std::string& path,
                                const CrackResult& result) {
     auto* f = std::fopen(path.c_str(), "w");
@@ -77,9 +93,9 @@ static void write_json_result(const std::string& path,
         "  \"candidates_tested\": %zu,\n"
         "  \"hashes_per_second\": %.2f\n"
         "}\n",
-        result.plaintext.c_str(),
-        result.hash.c_str(),
-        result.algorithm.c_str(),
+        json_escape(result.plaintext).c_str(),
+        json_escape(result.hash).c_str(),
+        json_escape(result.algorithm).c_str(),
         result.elapsed_seconds,
         result.candidates_tested,
         result.hashes_per_second);

@@ -4,6 +4,7 @@
 #pragma once
 
 #include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <string>
 #include <string_view>
@@ -30,6 +31,8 @@ private:
     std::size_t total_;
     const std::atomic<bool>& found_;
     const std::atomic<std::size_t>& tested_;
+
+    std::chrono::steady_clock::time_point start_time_;
 
     static std::size_t terminal_width();
     std::string render_bar(double fraction, std::size_t width) const;

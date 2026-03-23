@@ -65,3 +65,10 @@ TEST(SHA512HasherTest, StaticProperties) {
     EXPECT_EQ(SHA512Hasher::name(), "SHA512");
     EXPECT_EQ(SHA512Hasher::digest_length(), 128);
 }
+
+TEST(HasherTest, NeverReturnsEmpty) {
+    EXPECT_FALSE(MD5Hasher{}.hash("test").empty());
+    EXPECT_FALSE(SHA1Hasher{}.hash("test").empty());
+    EXPECT_FALSE(SHA256Hasher{}.hash("test").empty());
+    EXPECT_FALSE(SHA512Hasher{}.hash("test").empty());
+}

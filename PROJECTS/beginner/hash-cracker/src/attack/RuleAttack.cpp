@@ -30,6 +30,15 @@ bool RuleAttack::load_next_word() {
         mutations_.push_back(std::move(m));
     }
 
+    if (chain_rules_) {
+        std::vector<std::string> base(mutations_.begin() + 1, mutations_.end());
+        for (const auto& b : base) {
+            for (auto&& m : RuleSet::apply_all(b)) {
+                mutations_.push_back(std::move(m));
+            }
+        }
+    }
+
     mutation_index_ = 0;
     return true;
 }

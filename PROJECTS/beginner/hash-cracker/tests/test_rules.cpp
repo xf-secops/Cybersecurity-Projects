@@ -79,3 +79,18 @@ TEST(RuleAttackTest, AppliesRulesToDictionaryWords) {
     EXPECT_TRUE(std::ranges::find(candidates, "p@$$w0rd") != candidates.end());
     EXPECT_TRUE(std::ranges::find(candidates, "password") != candidates.end());
 }
+
+TEST(RuleAttackTest, ChainRulesProducesMoreCandidates) {
+    auto without = RuleAttack::create("tests/data/small_wordlist.txt", false, 0, 1);
+    auto with_chain = RuleAttack::create("tests/data/small_wordlist.txt", true, 0, 1);
+    ASSERT_TRUE(without.has_value());
+    ASSERT_TRUE(with_chain.has_value());
+
+    std::size_t count_without = 0;
+    while (without->next()) { ++count_without; }
+
+    std::size_t count_with = 0;
+    while (with_chain->next()) { ++count_with; }
+
+    EXPECT_GT(count_with, count_without);
+}

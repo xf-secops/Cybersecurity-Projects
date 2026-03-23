@@ -26,11 +26,8 @@ find_package(OpenSSL REQUIRED)
 find_package(Boost REQUIRED COMPONENTS program_options)
 
 set(HASHCRACKER_SOURCES
-    src/hash/MD5Hasher.cpp
-    src/hash/SHA1Hasher.cpp
-    src/hash/SHA256Hasher.cpp
-    src/hash/SHA512Hasher.cpp
     src/hash/HashDetector.cpp
+    src/io/MappedFile.cpp
     src/attack/DictionaryAttack.cpp
     src/attack/BruteForceAttack.cpp
     src/attack/RuleAttack.cpp
