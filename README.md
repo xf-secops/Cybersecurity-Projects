@@ -25,7 +25,7 @@
 <h2 align="center"><strong>View Complete Projects:</strong></h2>
 <div align="center">
   <a href="https://github.com/CarterPerez-dev/Cybersecurity-Projects/tree/main/PROJECTS">
-    <img src="https://img.shields.io/badge/Full_Source_Code-18/67-blue?style=for-the-badge&logo=github" alt="Projects"/>
+    <img src="https://img.shields.io/badge/Full_Source_Code-19/67-blue?style=for-the-badge&logo=github" alt="Projects"/>
   </a>
 </div>
 
@@ -73,7 +73,7 @@ Tools, courses, certifications, communities, and frameworks for cybersecurity pr
 | **[Linux eBPF Security Tracer](./SYNOPSES/beginner/Linux.eBPF.Security.Tracer.md)**<br>Real-time syscall tracing with eBPF | ![2-3h](https://img.shields.io/badge/⏱️_10--12h-blue) ![Python](https://img.shields.io/badge/Python-3776AB?logo=python&logoColor=white) ![C](https://img.shields.io/badge/C-A8B9CC?logo=c&logoColor=black) ![Beginner](https://img.shields.io/badge/●_Beginner-green) | eBPF programs • Syscall tracing • BCC framework • Security observability<br>[Learn More](./SYNOPSES/beginner/Linux.eBPF.Security.Tracer.md) |
 | **[Trojan Application Builder](./SYNOPSES/beginner/Trojan.Application.Builder.md)**<br>Educational malware lifecycle demo | ![2-3h](https://img.shields.io/badge/⏱️_8--10h-blue) ![Python](https://img.shields.io/badge/Python-3776AB?logo=python&logoColor=white) ![Beginner](https://img.shields.io/badge/●_Beginner-green) | Trojan anatomy • Data exfiltration • File encryption • Attack lifecycle<br>[Learn More](./SYNOPSES/beginner/Trojan.Application.Builder.md) |
 | **[DNS Sinkhole](./SYNOPSES/beginner/DNS.Sinkhole.md)**<br>Pi-hole-style malware domain blocker | ![3-4h](https://img.shields.io/badge/⏱️_10--12h-blue) ![Go](https://img.shields.io/badge/Go-00ADD8?logo=go&logoColor=white) ![Beginner](https://img.shields.io/badge/●_Beginner-green) | DNS protocol • Blocklist management • Query logging • Network defense<br>[Learn More](./SYNOPSES/beginner/DNS.Sinkhole.md) |
-| **[Firewall Rule Engine](./SYNOPSES/beginner/Vlang.Firewall.Rule.Engine.md)**<br>Parse and validate iptables/nftables rules | ![2-3h](https://img.shields.io/badge/⏱️_6--8h-blue) ![V](https://img.shields.io/badge/V-5D87BF?logo=v&logoColor=white) ![Beginner](https://img.shields.io/badge/●_Beginner-green) | Firewall internals • Rule parsing • iptables/nftables • V language<br>[Learn More](./SYNOPSES/beginner/Vlang.Firewall.Rule.Engine.md) |
+| **[Firewall Rule Engine](./PROJECTS/beginner/firewall-rule-engine)**<br>Parse and validate iptables/nftables rules | ![2-3h](https://img.shields.io/badge/⏱️_6--8h-blue) ![V](https://img.shields.io/badge/V-5D87BF?logo=v&logoColor=white) ![Beginner](https://img.shields.io/badge/●_Beginner-green) | Firewall internals • Rule parsing • iptables/nftables • V language<br>[Source Code](./PROJECTS/beginner/firewall-rule-engine) \| [Docs](./PROJECTS/beginner/firewall-rule-engine/learn) |
 | **[LLM Prompt Injection Firewall](./SYNOPSES/beginner/LLM.Prompt.Injection.Firewall.md)**<br>Detect and block prompt injection attacks | ![2-3h](https://img.shields.io/badge/⏱️_8--10h-blue) ![Python](https://img.shields.io/badge/Python-3776AB?logo=python&logoColor=white) ![Beginner](https://img.shields.io/badge/●_Beginner-green) | AI security • Prompt injection • Input sanitization • LLM defense<br>[Learn More](./SYNOPSES/beginner/LLM.Prompt.Injection.Firewall.md) |
 
 ## Intermediate Projects
