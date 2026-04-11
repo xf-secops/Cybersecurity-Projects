@@ -35,10 +35,7 @@ from dlp_scanner.extractors.structured import (
     XmlExtractor,
     YamlExtractor,
 )
-from dlp_scanner.models import (
-    ScanResult,
-    TextChunk,
-)
+from dlp_scanner.models import ScanResult
 from dlp_scanner.scoring import match_to_finding
 
 

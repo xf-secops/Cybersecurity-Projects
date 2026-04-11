@@ -10,7 +10,6 @@ from pathlib import Path
 import structlog
 
 from dlp_scanner.config import ScanConfig
-from dlp_scanner.detectors.base import DetectorMatch
 from dlp_scanner.detectors.registry import DetectorRegistry
 from dlp_scanner.models import (
     Finding,
@@ -22,10 +21,7 @@ from dlp_scanner.network.exfiltration import (
     ExfilIndicator,
     detect_base64_payload,
 )
-from dlp_scanner.network.flow_tracker import (
-    FlowTracker,
-    make_flow_key,
-)
+from dlp_scanner.network.flow_tracker import FlowTracker
 from dlp_scanner.network.pcap import read_pcap
 from dlp_scanner.network.protocols import (
     DNS_PORT,
@@ -131,8 +127,10 @@ class NetworkScanner:
             if (
                 packet.protocol == "udp"
                 and (
-                    packet.src_port == DNS_PORT
-                    or packet.dst_port == DNS_PORT
+                    DNS_PORT in (
+                        packet.src_port,
+                        packet.dst_port,
+                    )
                 )
             ):
                 self._process_dns_packet(
