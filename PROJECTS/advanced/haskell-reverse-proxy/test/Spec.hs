@@ -180,6 +180,10 @@ import Aenebris.ML.Features
   , uaSecChConsistency
   , userAgentLengthCap
   )
+import Aenebris.ML.Loader
+  ( ParseError(..)
+  , parseEnsemble
+  )
 import Aenebris.Middleware.Redirect (httpsRedirect, httpsRedirectWithPort)
 import Aenebris.Middleware.Security
   ( addSecurityHeaders
@@ -224,6 +228,9 @@ import qualified Data.IP as IP
 import qualified Data.Vector as V
 import qualified Data.Vector.Unboxed as VU
 import qualified Data.Map.Strict as Map
+import qualified Data.Text as T
+import qualified Data.Text.Encoding as TE
+import Data.Either (isLeft)
 import Data.Int (Int8)
 import Data.Maybe (isJust, isNothing)
 import Data.Time.Clock.POSIX (getPOSIXTime)
@@ -266,8 +273,10 @@ import Network.Wai.Test
 import Test.Hspec
   ( Spec
   , describe
+  , expectationFailure
   , hspec
   , it
+  , runIO
   , shouldBe
   , shouldNotBe
   , shouldReturn
@@ -323,6 +332,7 @@ main = hspec $ do
   geoSpec
   mlFeaturesSpec
   mlModelSpec
+  mlLoaderSpec
 
 configSpec :: Spec
 configSpec = describe "Config" $ do
@@ -1787,6 +1797,250 @@ mlModelSpec = describe "ML.Model" $ do
         bad  = base { treeThreshold = VU.fromList [99.0, 0.0, 0.0] }
     validateTree 20 bad `shouldSatisfy`
       (\r -> case r of { Left _ -> True; Right _ -> False })
+
+mlLoaderModel :: T.Text
+mlLoaderModel = T.unlines
+  [ "tree"
+  , "version=v4"
+  , "num_class=1"
+  , "num_tree_per_iteration=1"
+  , "label_index=0"
+  , "max_feature_idx=0"
+  , "objective=binary sigmoid:1"
+  , "feature_names=feat0"
+  , "feature_infos=[0:1]"
+  , ""
+  , "Tree=0"
+  , "num_leaves=1"
+  , "num_cat=0"
+  , "leaf_value=0.5"
+  , "shrinkage=1"
+  , ""
+  , "end of trees"
+  ]
+
+mlLoaderModelBytes :: BS.ByteString
+mlLoaderModelBytes = TE.encodeUtf8 mlLoaderModel
+
+mlLoaderSubst :: T.Text -> T.Text -> BS.ByteString
+mlLoaderSubst needle replacement =
+  TE.encodeUtf8 (T.replace needle replacement mlLoaderModel)
+
+parseFailsAt :: T.Text -> Either ParseError Ensemble -> Bool
+parseFailsAt expectedKey (Left e) = peKey e == expectedKey
+parseFailsAt _ _                  = False
+
+parseSucceeds :: Either ParseError Ensemble -> Bool
+parseSucceeds (Right _) = True
+parseSucceeds _         = False
+
+mlLoaderSpec :: Spec
+mlLoaderSpec = describe "ML.Loader" $ do
+  tinyBytes  <- runIO (BS.readFile "test/fixtures/ml/tiny_lgbm_v4.txt")
+  stumpBytes <- runIO (BS.readFile "test/fixtures/ml/stump_lgbm_v4.txt")
+
+  describe "happy path: tiny v4 fixture" $ do
+    it "parses into a single-tree binary-logistic ensemble" $
+      case parseEnsemble tinyBytes of
+        Right ens -> do
+          ensembleTreeCount ens     `shouldBe` 1
+          ensembleFeatureCount ens  `shouldBe` 2
+          ensembleObjective ens     `shouldBe` ObjectiveBinaryLogistic
+          ensembleSigmoidScale ens  `shouldBe` 1.0
+          ensembleAverageOutput ens `shouldBe` False
+          ensembleVersion ens       `shouldBe` currentEnsembleVersion
+          ensembleBaseScore ens     `shouldBe` 0.0
+        Left err -> expectationFailure (show err)
+
+    it "produces unified SoA with 2*num_leaves - 1 = 5 nodes" $
+      case parseEnsemble tinyBytes of
+        Right ens -> treeNodeCount (V.head (ensembleTrees ens)) `shouldBe` 5
+        Left err  -> expectationFailure (show err)
+
+    it "decodes negative children into unified leaf indices" $
+      case parseEnsemble tinyBytes of
+        Right ens -> do
+          let tree = V.head (ensembleTrees ens)
+          treeLeftChild  tree VU.! 0 `shouldBe` 1
+          treeRightChild tree VU.! 0 `shouldBe` 4
+          treeLeftChild  tree VU.! 1 `shouldBe` 2
+          treeRightChild tree VU.! 1 `shouldBe` 3
+        Left err -> expectationFailure (show err)
+
+    it "marks unified leaf rows with leafSentinel and noChildIndex" $
+      case parseEnsemble tinyBytes of
+        Right ens -> do
+          let tree = V.head (ensembleTrees ens)
+          treeFeatureIdx tree VU.! 2 `shouldBe` leafSentinel
+          treeFeatureIdx tree VU.! 3 `shouldBe` leafSentinel
+          treeFeatureIdx tree VU.! 4 `shouldBe` leafSentinel
+          treeLeftChild  tree VU.! 2 `shouldBe` noChildIndex
+          treeRightChild tree VU.! 2 `shouldBe` noChildIndex
+        Left err -> expectationFailure (show err)
+
+    it "preserves leaf values at unified leaf indices" $
+      case parseEnsemble tinyBytes of
+        Right ens -> do
+          let tree = V.head (ensembleTrees ens)
+          treeLeafValue tree VU.! 2 `shouldBe`   0.3
+          treeLeafValue tree VU.! 3 `shouldBe` (-0.2)
+          treeLeafValue tree VU.! 4 `shouldBe` (-0.4)
+        Left err -> expectationFailure (show err)
+
+    it "preserves split feature indices and thresholds for internal nodes" $
+      case parseEnsemble tinyBytes of
+        Right ens -> do
+          let tree = V.head (ensembleTrees ens)
+          treeFeatureIdx tree VU.! 0 `shouldBe` 1
+          treeFeatureIdx tree VU.! 1 `shouldBe` 0
+          treeThreshold  tree VU.! 0 `shouldBe` 0.0
+          treeThreshold  tree VU.! 1 `shouldBe` 5.0
+        Left err -> expectationFailure (show err)
+
+    it "encodes categorical bitmap with cat_boundaries" $
+      case parseEnsemble tinyBytes of
+        Right ens -> do
+          let tree = V.head (ensembleTrees ens)
+          VU.toList (treeCatBoundaries tree) `shouldBe` [0, 1]
+          VU.toList (treeCatThreshold  tree) `shouldBe` [3]
+        Left err -> expectationFailure (show err)
+
+    it "tags categorical and numerical nodes via decision-type bits" $
+      case parseEnsemble tinyBytes of
+        Right ens -> do
+          let tree = V.head (ensembleTrees ens)
+          splitKindFromDecisionType (treeDecisionType tree VU.! 0)
+            `shouldBe` SplitCategorical
+          splitKindFromDecisionType (treeDecisionType tree VU.! 1)
+            `shouldBe` SplitNumerical
+        Left err -> expectationFailure (show err)
+
+    it "ignores trailing feature_importances:, parameters:, pandas_categorical:" $
+      parseEnsemble tinyBytes `shouldSatisfy` parseSucceeds
+
+  describe "happy path: stump v4 fixture" $ do
+    it "parses into a single-leaf tree with leafSentinel root" $
+      case parseEnsemble stumpBytes of
+        Right ens -> do
+          ensembleTreeCount ens      `shouldBe` 1
+          ensembleFeatureCount ens   `shouldBe` 1
+          let tree = V.head (ensembleTrees ens)
+          treeNodeCount tree         `shouldBe` 1
+          treeLeafValue  tree VU.! 0 `shouldBe` 0.5
+          treeFeatureIdx tree VU.! 0 `shouldBe` leafSentinel
+          treeLeftChild  tree VU.! 0 `shouldBe` noChildIndex
+          treeRightChild tree VU.! 0 `shouldBe` noChildIndex
+        Left err -> expectationFailure (show err)
+
+  describe "header rejection" $ do
+    it "rejects empty input" $
+      parseEnsemble BS.empty `shouldSatisfy` isLeft
+
+    it "rejects when first non-blank line is not 'tree'" $
+      parseEnsemble (TE.encodeUtf8 (T.replace "tree\n" "garbage\n" mlLoaderModel))
+        `shouldSatisfy` isLeft
+
+    it "rejects version=v3" $
+      parseEnsemble (mlLoaderSubst "version=v4" "version=v3")
+        `shouldSatisfy` parseFailsAt "version"
+
+    it "rejects version=v5" $
+      parseEnsemble (mlLoaderSubst "version=v4" "version=v5")
+        `shouldSatisfy` parseFailsAt "version"
+
+    it "rejects num_class=2 (multi-class)" $
+      parseEnsemble (mlLoaderSubst "num_class=1" "num_class=2")
+        `shouldSatisfy` parseFailsAt "num_class"
+
+    it "rejects num_tree_per_iteration=2 (multi-class)" $
+      parseEnsemble
+        (mlLoaderSubst "num_tree_per_iteration=1" "num_tree_per_iteration=2")
+        `shouldSatisfy` parseFailsAt "num_tree_per_iteration"
+
+    it "rejects feature_names count not matching max_feature_idx+1" $
+      parseEnsemble
+        (TE.encodeUtf8
+          (T.replace "feature_names=feat0" "feature_names=feat0 feat1" mlLoaderModel))
+        `shouldSatisfy` parseFailsAt "feature_names"
+
+    it "rejects unknown header keys" $
+      parseEnsemble
+        (TE.encodeUtf8
+          (T.replace "feature_infos=[0:1]\n"
+                     "feature_infos=[0:1]\nbogus_key=42\n" mlLoaderModel))
+        `shouldSatisfy` isLeft
+
+    it "rejects missing required header key (version)" $
+      parseEnsemble (TE.encodeUtf8 (T.replace "version=v4\n" "" mlLoaderModel))
+        `shouldSatisfy` parseFailsAt "version"
+
+  describe "objective and sigmoid extraction" $ do
+    it "parses sigmoid:0.5 from objective line" $
+      case parseEnsemble (mlLoaderSubst "sigmoid:1" "sigmoid:0.5") of
+        Right ens -> ensembleSigmoidScale ens `shouldBe` 0.5
+        Left err  -> expectationFailure (show err)
+
+    it "defaults objective to binary logistic when objective key absent" $
+      case parseEnsemble
+             (TE.encodeUtf8
+               (T.replace "objective=binary sigmoid:1\n" "" mlLoaderModel)) of
+        Right ens -> do
+          ensembleObjective ens    `shouldBe` ObjectiveBinaryLogistic
+          ensembleSigmoidScale ens `shouldBe` 1.0
+        Left err -> expectationFailure (show err)
+
+    it "rejects malformed sigmoid value" $
+      parseEnsemble (mlLoaderSubst "sigmoid:1" "sigmoid:notanumber")
+        `shouldSatisfy` parseFailsAt "objective"
+
+    it "rejects unknown objective name" $
+      parseEnsemble (mlLoaderSubst "objective=binary sigmoid:1" "objective=poisson")
+        `shouldSatisfy` parseFailsAt "objective"
+
+  describe "average_output bare key" $ do
+    it "defaults to False when absent" $
+      case parseEnsemble mlLoaderModelBytes of
+        Right ens -> ensembleAverageOutput ens `shouldBe` False
+        Left err  -> expectationFailure (show err)
+
+    it "sets True when bare 'average_output' line present" $
+      case parseEnsemble
+             (TE.encodeUtf8
+               (T.replace "feature_infos=[0:1]\n"
+                          "feature_infos=[0:1]\naverage_output\n" mlLoaderModel)) of
+        Right ens -> ensembleAverageOutput ens `shouldBe` True
+        Left err  -> expectationFailure (show err)
+
+  describe "tree-level rejection" $ do
+    it "rejects is_linear=1 in any tree" $
+      parseEnsemble
+        (TE.encodeUtf8
+          (T.replace "shrinkage=1\n" "is_linear=1\nshrinkage=1\n" mlLoaderModel))
+        `shouldSatisfy` parseFailsAt "is_linear"
+
+    it "rejects unknown tree keys" $
+      parseEnsemble
+        (TE.encodeUtf8
+          (T.replace "leaf_value=0.5\n" "leaf_value=0.5\nbogus=1\n" mlLoaderModel))
+        `shouldSatisfy` isLeft
+
+  describe "feature_names containing '='" $
+    it "accepts feature_names with '=' in a name" $
+      parseEnsemble
+        (TE.encodeUtf8
+          (T.replace "feature_names=feat0" "feature_names=foo=bar" mlLoaderModel))
+        `shouldSatisfy` parseSucceeds
+
+  describe "ParseError reporting" $ do
+    it "reports correct 1-indexed line number for version error" $
+      case parseEnsemble (mlLoaderSubst "version=v4" "version=v3") of
+        Left err -> peLine err `shouldBe` 2
+        Right _  -> expectationFailure "expected Left"
+
+    it "reports the failing key name for version error" $
+      case parseEnsemble (mlLoaderSubst "version=v4" "version=v3") of
+        Left err -> peKey err `shouldBe` "version"
+        Right _  -> expectationFailure "expected Left"
 
 headersOnlyRequest :: [(BS.ByteString, BS.ByteString)] -> Request
 headersOnlyRequest hs =
