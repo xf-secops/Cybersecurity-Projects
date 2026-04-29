@@ -62,14 +62,16 @@ module CRE::Rotators
       content.includes?(expected_line) && content.bytesize > 0
     end
 
-    def commit(c : Domain::Credential, _s : Domain::NewSecret) : Nil
+    def commit(c : Domain::Credential, s : Domain::NewSecret) : Nil
+      _ = s
       path = c.tag("path").not_nil!
       pending_path = "#{path}.pending"
       raise RotatorError.new("pending file missing at commit time: #{pending_path}") unless File.exists?(pending_path)
       File.rename(pending_path, path)
     end
 
-    def rollback_apply(c : Domain::Credential, _s : Domain::NewSecret) : Nil
+    def rollback_apply(c : Domain::Credential, s : Domain::NewSecret) : Nil
+      _ = s
       path = c.tag("path").not_nil!
       pending_path = "#{path}.pending"
       File.delete(pending_path) if File.exists?(pending_path)
