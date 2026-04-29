@@ -122,7 +122,7 @@ credential-enumeration/
 │       ├── validate.sh            # Integration test: runs scanner, checks all 7 categories
 │       └── planted/               # Credential fixtures (SSH keys, AWS creds, tokens, etc)
 ├── config.nims                    # Nim compiler switches (ORC, musl, zigcc, cross-compile)
-├── credential-enumeration.nimble  # Package manifest
+├── credenum.nimble                # Package manifest
 ├── Justfile                       # Build, test, release, format commands
 └── install.sh                     # One-step install: compile + PATH setup
 ```
