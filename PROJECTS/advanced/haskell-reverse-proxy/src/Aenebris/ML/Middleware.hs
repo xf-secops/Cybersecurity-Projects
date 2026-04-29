@@ -54,7 +54,7 @@ challengeWireText :: ByteString
 challengeWireText = "challenge"
 
 botBlockBody :: LBS.ByteString
-botBlockBody = "403 Forbidden \x2014 request blocked by Aenebris ML"
+botBlockBody = "403 Forbidden - request blocked by Aenebris ML"
 
 challengePageBody :: LBS.ByteString
 challengePageBody =

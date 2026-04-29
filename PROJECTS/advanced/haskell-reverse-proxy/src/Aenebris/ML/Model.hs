@@ -329,15 +329,19 @@ validateCategoricalNode
   :: Int -> Int -> Tree -> Int -> Int -> Int -> Int -> Either String ()
 validateCategoricalNode featureCount nodeCount t i fIdx lIdx rIdx = do
   validateSplitNode featureCount nodeCount i fIdx lIdx rIdx
-  let catIdx = floor (treeThreshold t VU.! i) :: Int
-      nBound = VU.length (treeCatBoundaries t)
-  if nBound < 2
+  let rawThreshold = treeThreshold t VU.! i
+      catIdx       = floor rawThreshold :: Int
+      nBound       = VU.length (treeCatBoundaries t)
+  if fromIntegral catIdx /= rawThreshold
     then Left ("Categorical node " <> show i
-               <> " requires non-empty cat_boundaries")
-    else if catIdx < 0 || catIdx >= nBound - 1
+               <> " has non-integer threshold " <> show rawThreshold)
+    else if nBound < 2
       then Left ("Categorical node " <> show i
-                 <> " has out-of-range bitmap slice index " <> show catIdx)
-      else Right ()
+                 <> " requires non-empty cat_boundaries")
+      else if catIdx < 0 || catIdx >= nBound - 1
+        then Left ("Categorical node " <> show i
+                   <> " has out-of-range bitmap slice index " <> show catIdx)
+        else Right ()
 
 validateEnsemble :: Int -> Ensemble -> Either String ()
 validateEnsemble expectedFeatures ens = do

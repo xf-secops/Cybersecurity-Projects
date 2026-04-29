@@ -60,9 +60,11 @@ import qualified Data.ByteString.Char8 as BC
 import qualified Data.ByteString.Lazy as LBS
 import Data.GeoIP2 (GeoDB, GeoResult(..), AS(..), findGeoData, openGeoDB)
 import Data.IP (IP(..), fromHostAddress, fromHostAddress6)
+import Data.List (minimumBy)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe, isJust)
+import Data.Ord (comparing)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
@@ -94,6 +96,9 @@ defaultGeoSweepIntervalMicros = 60_000_000
 
 defaultGeoFlaggedAsns :: [Int]
 defaultGeoFlaggedAsns = []
+
+defaultGeoAsnCountCap :: Int
+defaultGeoAsnCountCap = 200_000
 
 geoResponseHeaderName :: HeaderName
 geoResponseHeaderName = "x-aenebris-geo"
@@ -262,8 +267,19 @@ bumpAsnCounter Geo{..} n now = do
           | now - awWindowStart w < window ->
               w { awCount = awCount w + 1 }
         _ -> AsnWindow { awCount = 1, awWindowStart = now }
-  writeTVar geoAsnCounts $! Map.insert n entry m
+      inserted = Map.insert n entry m
+      bounded = capAsnCounts inserted
+  writeTVar geoAsnCounts $! bounded
   pure (awCount entry)
+
+capAsnCounts :: Map Int AsnWindow -> Map Int AsnWindow
+capAsnCounts m
+  | Map.size m <= defaultGeoAsnCountCap = m
+  | otherwise =
+      let oldestKey = fst $ minimumBy
+            (comparing (awWindowStart . snd))
+            (Map.toList m)
+      in Map.delete oldestKey m
 
 asnConcentrationScore :: Geo -> Int -> Double
 asnConcentrationScore Geo{..} count =

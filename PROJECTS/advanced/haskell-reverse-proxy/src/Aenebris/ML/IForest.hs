@@ -16,6 +16,7 @@ module Aenebris.ML.IForest
   , minSubsampleForNormalization
   , defaultIForestNumTrees
   , defaultIForestSubsampleSize
+  , maxIForestDepth
   ) where
 
 import Data.Vector (Vector)
@@ -43,6 +44,12 @@ defaultIForestNumTrees = 100
 
 defaultIForestSubsampleSize :: Int
 defaultIForestSubsampleSize = 256
+
+maxIForestDepth :: Int
+maxIForestDepth = 64
+
+depthBoundLeafSize :: Int
+depthBoundLeafSize = 1
 
 data ITree
   = ITreeLeaf !Int
@@ -77,14 +84,17 @@ averagePathLength !trees !fv =
     addPath !acc !tree = acc + pathLength tree fv initialDepth
 
 pathLength :: ITree -> VU.Vector Double -> Int -> Double
-pathLength !tree !fv !currentDepth = case tree of
-  ITreeLeaf !size ->
-    fromIntegral currentDepth + normalizationConstant size
-  ITreeSplit !featIdx !thr !left !right ->
-    let !fval = fv VU.! featIdx
-    in if fval <= thr
-         then pathLength left  fv (currentDepth + 1)
-         else pathLength right fv (currentDepth + 1)
+pathLength !tree !fv !currentDepth
+  | currentDepth >= maxIForestDepth =
+      fromIntegral currentDepth + normalizationConstant depthBoundLeafSize
+  | otherwise = case tree of
+      ITreeLeaf !size ->
+        fromIntegral currentDepth + normalizationConstant size
+      ITreeSplit !featIdx !thr !left !right ->
+        let !fval = fv VU.! featIdx
+        in if fval <= thr
+             then pathLength left  fv (currentDepth + 1)
+             else pathLength right fv (currentDepth + 1)
 
 normalizationConstant :: Int -> Double
 normalizationConstant n

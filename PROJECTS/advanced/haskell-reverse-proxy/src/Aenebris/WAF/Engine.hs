@@ -170,4 +170,4 @@ wafMiddleware rsVar app req respond = do
         [ ("Content-Type", "text/plain; charset=utf-8")
         , (wafResponseHeader, "blocked score=" <> BC.pack (show score))
         ]
-        "403 Forbidden — request blocked by Aenebris WAF"
+        "403 Forbidden - request blocked by Aenebris WAF"

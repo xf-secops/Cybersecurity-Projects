@@ -274,7 +274,7 @@ robotsResponse cfg =
 robotsTxtBody :: HoneypotConfig -> ByteString
 robotsTxtBody HoneypotConfig{..} = BS.concat $
   [ "User-agent: *\n"
-  , "# Honeypot trap paths — Disallow per RFC 9309. Visiting these\n"
+  , "# Honeypot trap paths. Disallow per RFC 9309. Visiting these\n"
   , "# paths is treated as a violation signal regardless of declared UA.\n"
   ] <> map disallowLine hpPatterns
   where
