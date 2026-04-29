@@ -17,7 +17,7 @@ Build a tool that encodes and decodes multiple encoding formats including Base64
 
 6. **Build automatic format detection** by analyzing input data and identifying which encoding format is likely used: look for Base64 patterns (A-Za-z0-9+/= characters in multiples of 4), Base32 patterns (A-Z2-7= characters), hexadecimal patterns (0-9A-Fa-f sequences), and URL encoding patterns (%XX sequences). Use heuristics and pattern matching to make educated guesses about format, displaying confidence levels and alternative possibilities.
 
-7. **Create a multi-function CLI interface** accepting input as command-line arguments, from piped stdin, or from files, with options to specify encoding format, output format, and handling modes. Support batch processing of multiple values, interactive mode for real-time encoding/decoding, and pipeline-friendly output suitable for command chaining.
+7. **Create a multi function CLI interface** accepting input as command-line arguments, from piped stdin, or from files, with options to specify encoding format, output format, and handling modes. Support batch processing of multiple values, interactive mode for real-time encoding/decoding, and pipeline-friendly output suitable for command chaining.
 
 8. **Build comprehensive documentation** with examples of each encoding format showing input and output, explaining why different encodings exist and when each is used, and providing use cases in security contexts (Base64 in certificates and tokens, hex in binary analysis, URL encoding in web requests). Include common gotchas (padding issues, Unicode handling, case sensitivity) and provide examples of decoding real-world encoded data from security contexts.
 
@@ -36,3 +36,4 @@ Build a tool that encodes and decodes multiple encoding formats including Base64
 - URL encoding/decoding with form variants
 - Automatic format detection with confidence scoring
 - Batch and interactive processing modes
+  
