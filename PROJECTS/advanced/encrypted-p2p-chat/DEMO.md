@@ -16,12 +16,6 @@
 
 <br>
 
-<a href="https://chat.carterperez-dev.com">
-  <img src="https://img.shields.io/badge/▶_TRY_IT_LIVE-chat.carterperez--dev.com-DC143C?style=for-the-badge&logo=googlechrome&logoColor=white" alt="Live Demo"/>
-</a>
-
-<br>
-
 ```ruby
 docker compose up -d    →    https://localhost
 ```
