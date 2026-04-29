@@ -1,6 +1,6 @@
 """
-ⒸAngelaMos | 2025
-Alembic environment configuration for SQLModel migrations
+©AngelaMos | 2026
+env.py
 """
 
 from logging.config import fileConfig
@@ -11,14 +11,11 @@ from sqlmodel import SQLModel
 from alembic import context
 from app.config import settings
 
-# Import all models so they're registered with SQLModel metadata
 from app.models.User import User  # noqa: F401
 from app.models.Credential import Credential  # noqa: F401
 from app.models.IdentityKey import IdentityKey  # noqa: F401
 from app.models.SignedPrekey import SignedPrekey  # noqa: F401
 from app.models.OneTimePrekey import OneTimePrekey  # noqa: F401
-from app.models.RatchetState import RatchetState  # noqa: F401
-from app.models.SkippedMessageKey import SkippedMessageKey  # noqa: F401
 
 
 config = context.config

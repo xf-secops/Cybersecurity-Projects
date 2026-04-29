@@ -1,7 +1,7 @@
-/**
- * WebAuthn authentication service
- * Handles passkey registration and authentication flows
- */
+// ===================
+// © AngelaMos | 2026
+// auth.service.ts
+// ===================
 
 import { cryptoService } from '../crypto'
 import { api } from '../lib/api-client'
@@ -192,7 +192,25 @@ export async function login(username?: string): Promise<User> {
   return user
 }
 
-export function logout(): void {
+export async function rehydrateSession(): Promise<User | null> {
+  try {
+    const user = await api.auth.me()
+    setCurrentUser(user)
+    await cryptoService.initialize(user.id)
+    return user
+  } catch {
+    storeLogout()
+    return null
+  }
+}
+
+export async function logout(): Promise<void> {
+  try {
+    await api.auth.logout()
+  } catch {
+    /* ignore network errors during logout */
+  }
+  await cryptoService.clearAllSessions()
   storeLogout()
 }
 
@@ -236,6 +254,7 @@ export const authService = {
   register,
   login,
   logout,
+  rehydrateSession,
   isWebAuthnSupported,
   isPlatformAuthenticatorAvailable,
   isConditionalUIAvailable,

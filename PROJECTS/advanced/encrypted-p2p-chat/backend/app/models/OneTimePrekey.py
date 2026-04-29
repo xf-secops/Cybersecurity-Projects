@@ -1,9 +1,8 @@
 """
-ⒸAngelaMos | 2025
-X3DH one time prekey model for single use key exchange
+©AngelaMos | 2026
+OneTimePrekey.py
 """
 
-from typing import TYPE_CHECKING
 from uuid import UUID
 
 from sqlmodel import Field
@@ -11,13 +10,10 @@ from sqlmodel import Field
 from app.config import ONE_TIME_PREKEY_LENGTH
 from app.models.Base import BaseDBModel
 
-if TYPE_CHECKING:
-    pass
-
 
 class OneTimePrekey(BaseDBModel, table = True):
     """
-    X25519 one time prekey consumed after single use for X3DH protocol
+    X25519 one time prekey public half consumed after single use
     """
     __tablename__ = "one_time_prekeys"
 
@@ -30,8 +26,7 @@ class OneTimePrekey(BaseDBModel, table = True):
 
     key_id: int = Field(nullable = False, index = True)
 
-    public_key: str = Field(nullable = False, max_length = ONE_TIME_PREKEY_LENGTH)
-    private_key: str = Field(
+    public_key: str = Field(
         nullable = False,
         max_length = ONE_TIME_PREKEY_LENGTH
     )

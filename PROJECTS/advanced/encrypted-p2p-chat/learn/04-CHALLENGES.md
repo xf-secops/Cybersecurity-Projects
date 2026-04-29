@@ -25,23 +25,23 @@ Each challenge references actual files in this project. The line numbers point y
 
 The backend already has the scaffolding for this. Look at these files:
 
-- `backend/app/config.py:54` defines `WS_MESSAGE_TYPE_RECEIPT = "receipt"` already
-- `backend/app/services/websocket_service.py:69-70` already routes receipt messages to `handle_read_receipt`
-- `backend/app/services/websocket_service.py:272-314` has a working `handle_read_receipt` implementation
-- `backend/app/schemas/websocket.py:62-69` defines `ReadReceiptWS` with `message_id`, `user_id`, and `read_at`
+- `backend/app/config.py` defines `WS_MESSAGE_TYPE_RECEIPT = "receipt"` already
+- `backend/app/services/backend/app/services/websocket_service.py` already routes receipt messages to `handle_read_receipt`
+- `backend/app/services/backend/app/services/websocket_service.py` has a working `handle_read_receipt` implementation
+- `backend/app/schemas/websocket.py` defines `ReadReceiptWS` with `message_id`, `user_id`, and `read_at`
 
 So the backend is done. The work is on the frontend.
 
 **Implementation approach:**
 
 1. When Bob's client decrypts and displays a message from Alice, emit a receipt through the WebSocket:
-   ```json
-   {
-     "type": "receipt",
-     "message_id": "messages:abc123",
-     "sender_id": "alice-uuid-here"
-   }
-   ```
+ ```json
+ {
+ "type": "receipt",
+ "message_id": "messages:abc123",
+ "sender_id": "alice-uuid-here"
+ }
+ ```
 
 2. Alice's client receives the `ReadReceiptWS` via the WebSocket message handler at `frontend/src/websocket/message-handlers.ts`. Add a handler for the `"receipt"` message type.
 
@@ -79,11 +79,11 @@ So the backend is done. The work is on the frontend.
 
 This feature is substantially built already. Study what exists:
 
-- `backend/app/config.py:52` defines `WS_MESSAGE_TYPE_TYPING = "typing"`
-- `backend/app/services/websocket_service.py:65-66` routes typing messages to `handle_typing_indicator`
-- `backend/app/services/websocket_service.py:181-224` broadcasts typing events to the room via `connection_manager.broadcast_to_room`
-- `backend/app/schemas/websocket.py:42-49` defines `TypingIndicatorWS` with `user_id`, `room_id`, `is_typing`
-- `frontend/src/stores/typing.store.ts:1-113` is a complete typing store with auto-clear timeouts (5 seconds, line 10)
+- `backend/app/config.py` defines `WS_MESSAGE_TYPE_TYPING = "typing"`
+- `backend/app/services/backend/app/services/websocket_service.py` routes typing messages to `handle_typing_indicator`
+- `backend/app/services/backend/app/services/websocket_service.py` broadcasts typing events to the room via `connection_manager.broadcast_to_room`
+- `backend/app/schemas/websocket.py` defines `TypingIndicatorWS` with `user_id`, `room_id`, `is_typing`
+- `frontend/src/stores/typing.store.ts` is a complete typing store with auto-clear timeouts (5 seconds,)
 - `frontend/src/components/Chat/TypingIndicator.tsx` already renders the typing indicator UI
 
 The backend and most of the frontend state management are done. What is missing:
@@ -100,11 +100,11 @@ The backend and most of the frontend state management are done. What is missing:
 
 **Throttling pattern:**
 ```
-Keystroke at t=0ms   -> send "typing: true"
+Keystroke at t=0ms -> send "typing: true"
 Keystroke at t=500ms -> suppress (within 3s window)
-Keystroke at t=1.2s  -> suppress
-Keystroke at t=4.5s  -> send "typing: true" (new window)
-No input for 3s      -> send "typing: false"
+Keystroke at t=1.2s -> suppress
+Keystroke at t=4.5s -> send "typing: true" (new window)
+No input for 3s -> send "typing: false"
 ```
 
 **Do not encrypt typing events.** They are ephemeral metadata. Running them through the Double Ratchet would advance the ratchet state for throwaway data, wasting chain keys and increasing the risk of desynchronization.
@@ -113,7 +113,7 @@ No input for 3s      -> send "typing: false"
 - Open two tabs as different users in the same room
 - Start typing in Tab A
 - Verify "typing..." appears in Tab B within 1 second
-- Stop typing and verify the indicator disappears after 5 seconds (the `TYPING_TIMEOUT_MS` constant at `typing.store.ts:10`)
+- Stop typing and verify the indicator disappears after 5 seconds (the `TYPING_TIMEOUT_MS` constant at `typing.store.ts`)
 - Type rapidly and verify only one WebSocket event per 3-second window (check WS frames in DevTools)
 - Switch rooms and verify typing state resets
 
@@ -123,7 +123,7 @@ No input for 3s      -> send "typing: false"
 
 **What to build:** Display human-readable timestamps on messages ("2:34 PM", "Yesterday", "Jan 15") and ensure messages display in correct chronological order even when they arrive out of order over the WebSocket.
 
-**Why it matters:** The Double Ratchet protocol handles cryptographic out-of-order delivery (see `double_ratchet.py:215-244` for the skipped message key logic), but the UI also needs to handle display ordering correctly. This is a common source of bugs in messaging apps. If Alice sends message A then message B, but B arrives at Bob first over the WebSocket, the UI must still display A before B.
+**Why it matters:** The Double Ratchet protocol handles cryptographic out-of-order delivery (see `frontend/src/crypto/double-ratchet.ts` for the skipped message key logic), but the UI also needs to handle display ordering correctly. This is a common source of bugs in messaging apps. If Alice sends message A then message B, but B arrives at Bob first over the WebSocket, the UI must still display A before B.
 
 **What you will learn:**
 - Client-side message sorting with stable ordering
@@ -132,22 +132,22 @@ No input for 3s      -> send "typing: false"
 
 **Where to start reading:**
 
-- `backend/app/schemas/websocket.py:26-39` shows `EncryptedMessageWS` includes a `timestamp` field
-- `frontend/src/crypto/message-store.ts:95-119` already sorts messages by `created_at` (line 106-107)
+- `backend/app/schemas/websocket.py` shows `EncryptedMessageWS` includes a `timestamp` field
+- `frontend/src/crypto/message-store.ts` already sorts messages by `created_at`
 - `frontend/src/lib/date.ts` is the existing date utility file
 - `frontend/src/components/Chat/MessageBubble.tsx` renders individual messages
 
 **Implementation approach:**
 
-1. The message store at `message-store.ts:106-107` already sorts by `created_at`. Verify this works when messages arrive out of order by checking that new messages insert at the correct position, not just appended at the end.
+1. The message store at `message-store.ts` already sorts by `created_at`. Verify this works when messages arrive out of order by checking that new messages insert at the correct position, not just appended at the end.
 
 2. Create a timestamp formatter. Use `Intl.RelativeTimeFormat` for recent messages and `Intl.DateTimeFormat` for older ones:
-   - Under 1 minute: "Just now"
-   - Under 1 hour: "12 min ago"
-   - Same day: "2:34 PM"
-   - Yesterday: "Yesterday at 2:34 PM"
-   - Same year: "Jan 15 at 2:34 PM"
-   - Older: "Jan 15, 2025 at 2:34 PM"
+ - Under 1 minute: "Just now"
+ - Under 1 hour: "12 min ago"
+ - Same day: "2:34 PM"
+ - Yesterday: "Yesterday at 2:34 PM"
+ - Same year: "Jan 15 at 2:34 PM"
+ - Older: "Jan 15, 2025 at 2:34 PM"
 
 3. Add date separator headers between messages from different days. When rendering the message list, compare each message's date with the previous message. If they differ, insert a "--- January 15, 2025 ---" separator.
 
@@ -175,20 +175,20 @@ No input for 3s      -> send "typing: false"
 
 The backend infrastructure is already built:
 
-- `backend/app/core/websocket_manager.py:74` calls `presence_service.set_user_online(user_id)` on WebSocket connect
-- `backend/app/core/websocket_manager.py:108` calls `presence_service.set_user_offline(user_id)` on disconnect (only when the last connection for that user closes)
-- `backend/app/services/presence_service.py:22-35` sets online status in SurrealDB
-- `backend/app/services/presence_service.py:37-50` sets offline status
-- `backend/app/services/websocket_service.py:226-270` handles presence update messages
+- `backend/app/core/websocket_manager.py` calls `presence_service.set_user_online(user_id)` on WebSocket connect
+- `backend/app/core/websocket_manager.py` calls `presence_service.set_user_offline(user_id)` on disconnect (only when the last connection for that user closes)
+- `backend/app/services/presence_service.py` sets online status in SurrealDB
+- `backend/app/services/presence_service.py` sets offline status
+- `backend/app/services/backend/app/services/websocket_service.py` handles presence update messages
 
 The frontend store is also ready:
 
-- `frontend/src/stores/presence.store.ts:1-72` has `$presenceByUser` map, `setUserPresence`, `getUserStatus`, `isUserOnline`
+- `frontend/src/stores/presence.store.ts` has `$presenceByUser` map, `setUserPresence`, `getUserStatus`, `isUserOnline`
 - `frontend/src/components/Chat/OnlineStatus.tsx` already renders the status indicator
 
 **Implementation approach:**
 
-1. When a user connects via WebSocket, the backend already updates SurrealDB presence. What is missing is broadcasting that change to the user's contacts. In `websocket_manager.py`, after `presence_service.set_user_online(user_id)` succeeds (line 74), broadcast a presence update to all rooms that user belongs to.
+1. When a user connects via WebSocket, the backend already updates SurrealDB presence. What is missing is broadcasting that change to the user's contacts. In `websocket_manager.py`, after `presence_service.set_user_online(user_id)` succeeds , broadcast a presence update to all rooms that user belongs to.
 
 2. Add a `PresenceUpdateWS` handler in the frontend WebSocket message handler. When a `"presence"` message arrives, call `setUserPresence` from the presence store.
 
@@ -223,30 +223,30 @@ Signal allows searching decrypted messages on-device. WhatsApp backs up messages
 
 **Where to start reading:**
 
-- `frontend/src/crypto/message-store.ts:1-211` is the existing IndexedDB message store with `decrypted_messages` object store
-- `frontend/src/crypto/message-store.ts:34-39` creates indexes on `room_id`, `created_at`, and a compound `room_created` index
-- `frontend/src/crypto/message-store.ts:95-119` shows how messages are queried by room
-- `frontend/src/crypto/key-store.ts:392-412` shows `clearAllKeys()` which wipes all crypto state on logout
+- `frontend/src/crypto/message-store.ts` is the existing IndexedDB message store with `decrypted_messages` object store
+- `frontend/src/crypto/message-store.ts` creates indexes on `room_id`, `created_at`, and a compound `room_created` index
+- `frontend/src/crypto/message-store.ts` shows how messages are queried by room
+- `frontend/src/crypto/key-store.ts` shows `clearAllKeys` which wipes all crypto state on logout
 
 **Implementation approach:**
 
-1. Decrypted messages are already stored in IndexedDB at `message-store.ts:61-67` (`saveDecryptedMessage`). The plaintext is already persisted locally. You do not need to add a separate plaintext store.
+1. Decrypted messages are already stored in IndexedDB at `message-store.ts` (`saveDecryptedMessage`). The plaintext is already persisted locally. You do not need to add a separate plaintext store.
 
 2. Add a `searchMessages` function to `message-store.ts`. IndexedDB does not support full-text search natively. You have two options:
 
-   Option A (simple): Load all messages for the user, filter with `String.prototype.includes()` or a regex. This works for small message histories (under 10,000 messages).
+ Option A (simple): Load all messages for the user, filter with `String.prototype.includes` or a regex. This works for small message histories (under 10,000 messages).
 
-   Option B (performant): Build a simple inverted index in a separate IndexedDB object store. On each message save, tokenize the plaintext, store `{token: string, message_id: string}` entries. Search queries look up tokens in the index. This scales to hundreds of thousands of messages.
+ Option B (performant): Build a simple inverted index in a separate IndexedDB object store. On each message save, tokenize the plaintext, store `{token: string, message_id: string}` entries. Search queries look up tokens in the index. This scales to hundreds of thousands of messages.
 
 3. Build a search UI. Add a search input to the sidebar. Results should show message previews with the matching text highlighted. Clicking a result should navigate to that message in the conversation and scroll it into view.
 
-4. Clear the search index on logout. Add this to whatever logout function already calls `clearAllKeys()` and `clearAllMessages()`.
+4. Clear the search index on logout. Add this to whatever logout function already calls `clearAllKeys` and `clearAllMessages`.
 
 **Security considerations:**
 
 The local plaintext store is a security tradeoff. If the device is compromised, the search history exposes message content. Signal handles this by only searching messages from the current app session (not backed by a persistent index). Consider offering a setting: "Enable message search (stores decrypted messages locally)" vs. "Maximum security (no local message storage)".
 
-Also consider: IndexedDB data survives browser cache clears in some browsers. Use `indexedDB.deleteDatabase()` on logout, not just clearing object stores.
+Also consider: IndexedDB data survives browser cache clears in some browsers. Use `indexedDB.deleteDatabase` on logout, not just clearing object stores.
 
 **How to test:**
 - Send several messages containing known keywords between two users
@@ -272,48 +272,48 @@ Also consider: IndexedDB data survives browser cache clears in some browsers. Us
 
 **Where to start reading:**
 
-- `frontend/src/crypto/primitives.ts:224-259` is the `aesGcmEncrypt` function. It accepts `Uint8Array` for plaintext, which means binary data works directly with no conversion needed.
-- `frontend/src/crypto/primitives.ts:261-292` is `aesGcmDecrypt`
-- `backend/app/services/message_service.py:269-314` is `store_encrypted_message` which stores to SurrealDB
-- `backend/app/config.py:44` defines `ENCRYPTED_CONTENT_MAX_LENGTH = 50000` (this limits inline message content, not file uploads)
+- `frontend/src/crypto/frontend/src/crypto/primitives.ts` is the `aesGcmEncrypt` function. It accepts `Uint8Array` for plaintext, which means binary data works directly with no conversion needed.
+- `frontend/src/crypto/frontend/src/crypto/primitives.ts` is `aesGcmDecrypt`
+- `backend/app/services/backend/app/services/message_service.py` is `store_encrypted_message` which stores to SurrealDB
+- `backend/app/config.py` defines `ENCRYPTED_CONTENT_MAX_LENGTH = 50000` (this limits inline message content, not file uploads)
 
 **Implementation approach:**
 
 1. **Client: Read and encrypt the file**
-   - Use `FileReader.readAsArrayBuffer()` to get the raw bytes
-   - For small files (under 1MB): encrypt the entire file as one AES-256-GCM operation using a message key from the Double Ratchet
-   - For large files (over 1MB): chunk into 1MB segments. Encrypt each chunk with a derived key: `chunk_key = HKDF(message_key, salt=chunk_index)`
-   - Each chunk gets its own nonce (never reuse nonces)
+ - Use `FileReader.readAsArrayBuffer` to get the raw bytes
+ - For small files (under 1MB): encrypt the entire file as one AES-256-GCM operation using a message key from the Double Ratchet
+ - For large files (over 1MB): chunk into 1MB segments. Encrypt each chunk with a derived key: `chunk_key = HKDF(message_key, salt=chunk_index)`
+ - Each chunk gets its own nonce (never reuse nonces)
 
 2. **Client: Upload encrypted blob**
-   - Create a new backend endpoint: `POST /api/messages/file`
-   - Send the encrypted blob as multipart form data
-   - Include metadata in the request: original filename, MIME type, file size, number of chunks, encryption header (same format as text message headers)
+ - Create a new backend endpoint: `POST /api/messages/file`
+ - Send the encrypted blob as multipart form data
+ - Include metadata in the request: original filename, MIME type, file size, number of chunks, encryption header (same format as text message headers)
 
 3. **Backend: Store encrypted file**
-   - Store the encrypted blob on disk or in object storage (not in SurrealDB, which is not designed for large binary data)
-   - Store file metadata in SurrealDB: `file_id`, `sender_id`, `recipient_id`, `room_id`, `filename`, `mime_type`, `size`, `chunk_count`, `storage_path`
-   - Return a `file_id` to the client
+ - Store the encrypted blob on disk or in object storage (not in SurrealDB, which is not designed for large binary data)
+ - Store file metadata in SurrealDB: `file_id`, `sender_id`, `recipient_id`, `room_id`, `filename`, `mime_type`, `size`, `chunk_count`, `storage_path`
+ - Return a `file_id` to the client
 
 4. **Client: Send file message**
-   - Send a regular encrypted message through the WebSocket, but the plaintext content is JSON metadata:
-     ```json
-     {
-       "type": "file",
-       "file_id": "abc123",
-       "filename": "document.pdf",
-       "mime_type": "application/pdf",
-       "size": 1048576,
-       "thumbnail": "<base64-encoded-encrypted-thumbnail>"
-     }
-     ```
-   - The recipient decrypts this metadata, then downloads the encrypted file by `file_id`, then decrypts the file client-side
+ - Send a regular encrypted message through the WebSocket, but the plaintext content is JSON metadata:
+ ```json
+ {
+ "type": "file",
+ "file_id": "abc123",
+ "filename": "document.pdf",
+ "mime_type": "application/pdf",
+ "size": 1048576,
+ "thumbnail": "<base64-encoded-encrypted-thumbnail>"
+ }
+ ```
+ - The recipient decrypts this metadata, then downloads the encrypted file by `file_id`, then decrypts the file client-side
 
 5. **For images: generate encrypted thumbnails**
-   - Before uploading, use `<canvas>` to resize the image to a thumbnail (200x200)
-   - Encrypt the thumbnail separately
-   - Include the encrypted thumbnail inline in the message (it is small enough)
-   - Render the thumbnail immediately, load the full image on click
+ - Before uploading, use `<canvas>` to resize the image to a thumbnail (200x200)
+ - Encrypt the thumbnail separately
+ - Include the encrypted thumbnail inline in the message (it is small enough)
+ - Render the thumbnail immediately, load the full image on click
 
 **Security considerations:**
 - Validate file size limits on the backend to prevent DoS (suggest 100MB max)
@@ -371,12 +371,12 @@ Each approach has different properties for security, UX, and complexity. This ch
 
 **Where to start reading:**
 
-- `backend/app/core/websocket_manager.py:39` stores `active_connections: dict[UUID, list[WebSocket]]` which already supports multiple connections per user
-- `backend/app/core/websocket_manager.py:52` enforces `WS_MAX_CONNECTIONS_PER_USER` (default 5, see `config.py:141`)
-- `backend/app/core/websocket_manager.py:145-153` iterates over ALL connections for a user when sending a message
-- `backend/app/services/prekey_service.py:152-219` initializes user keys with identity key, signed prekey, and one-time prekeys
+- `backend/app/core/websocket_manager.py` stores `active_connections: dict[UUID, list[WebSocket]]` which already supports multiple connections per user
+- `backend/app/core/websocket_manager.py` enforces `WS_MAX_CONNECTIONS_PER_USER` (default 5, see `config.py`)
+- `backend/app/core/websocket_manager.py` iterates over ALL connections for a user when sending a message
+- `backend/app/services/backend/app/services/prekey_service.py` initializes user keys with identity key, signed prekey, and one-time prekeys
 - `backend/app/models/IdentityKey.py` stores one identity key per user (this needs to change)
-- `backend/app/services/message_service.py:48-166` `initialize_conversation` creates one ratchet per user pair (this also needs to change)
+- `backend/app/services/backend/app/services/message_service.py` `initialize_conversation` creates one ratchet per user pair (this also needs to change)
 
 **Architecture change:**
 
@@ -387,8 +387,8 @@ Alice ----[one ratchet session]----> Bob
 
 With multi-device, it becomes:
 ```
-Alice-Phone  ----[ratchet A1-B1]----> Bob-Phone
-Alice-Phone  ----[ratchet A1-B2]----> Bob-Laptop
+Alice-Phone ----[ratchet A1-B1]----> Bob-Phone
+Alice-Phone ----[ratchet A1-B2]----> Bob-Laptop
 Alice-Laptop ----[ratchet A2-B1]----> Bob-Phone
 Alice-Laptop ----[ratchet A2-B2]----> Bob-Laptop
 ```
@@ -398,20 +398,19 @@ If Alice has 2 devices and Bob has 3 devices, there are 2 x 3 = 6 ratchet sessio
 **Implementation phases:**
 
 **Phase 1: Database schema changes**
-- Add a `device_id` column to the `IdentityKey` model. Change the unique constraint from `(user_id)` to `(user_id, device_id)`.
-- Add a `device_id` column to `RatchetState`. Change the unique constraint to `(user_id, peer_user_id, peer_device_id)`.
+- Add a `device_id` column to the `IdentityKey`, `SignedPrekey`, and `OneTimePrekey` models. Change the unique constraint on `IdentityKey` from `(user_id)` to `(user_id, device_id)`.
 - Add a `devices` table: `device_id`, `user_id`, `device_name`, `created_at`, `last_active`.
+- Client-side ratchet state in `frontend/src/crypto/key-store.ts` becomes keyed on `(peer_user_id, peer_device_id)` instead of just `peer_id`.
 
 **Phase 2: Device registration**
 - When a user registers a new device (via WebAuthn), generate a new identity key pair for that device.
 - Each device uploads its own prekey bundle (identity key, signed prekey, one-time prekeys).
-- The prekey bundle endpoint (`prekey_service.py:293-361`) needs a `device_id` parameter.
+- The prekey bundle endpoint (`backend/app/services/prekey_service.py`) needs a `device_id` parameter.
 
 **Phase 3: Message fan-out**
-- When Alice sends to Bob, the backend looks up all of Bob's devices.
-- For each device, it checks if a ratchet session exists. If not, it performs X3DH with that device's prekey bundle.
-- Alice's client encrypts the message once per recipient device.
-- The WebSocket forward logic at `websocket_service.py:87-179` sends the appropriate ciphertext to each device.
+- Alice's client fetches all of Bob's per-device prekey bundles, then runs X3DH and encrypts once per device.
+- The WebSocket payload from Alice to the server now carries `device_id` alongside `recipient_id`.
+- The forwarding logic in `backend/app/services/websocket_service.py:handle_encrypted_message` routes each ciphertext to the recipient device's connection.
 
 **Phase 4: Device linking**
 - A new device should NOT just register independently. It should be "linked" by an existing device.
@@ -422,13 +421,13 @@ If Alice has 2 devices and Bob has 3 devices, there are 2 x 3 = 6 ratchet sessio
 
 When Alice sends a message to Bob (who has 3 devices), the flow is:
 
-1. Alice's client fetches prekey bundles for ALL of Bob's devices: `GET /api/encryption/prekeys/{bob_id}?all_devices=true`
+1. Alice's client fetches prekey bundles for ALL of Bob's devices: `GET /encryption/prekey-bundle/{bob_id}?all_devices=true`
 2. Alice performs X3DH separately with each device's prekey bundle (3 separate key exchanges)
 3. Alice encrypts the message 3 times (once per ratchet session)
 4. Alice sends 3 encrypted payloads to the server, each tagged with `(recipient_id, device_id)`
 5. The server forwards each payload to the correct device
 
-This means the `store_encrypted_message` function at `message_service.py:269-314` needs a `device_id` field. The SurrealDB message schema changes from `{sender_id, recipient_id, ciphertext}` to `{sender_id, sender_device_id, recipient_id, recipient_device_id, ciphertext}`.
+This means the `store_encrypted_message` function at `backend/app/services/message_service.py` needs a `device_id` field. The SurrealDB message schema changes from `{sender_id, recipient_id, ciphertext}` to `{sender_id, sender_device_id, recipient_id, recipient_device_id, ciphertext}`.
 
 **Device verification:**
 
@@ -437,9 +436,9 @@ How does Alice know she is encrypting to Bob's real devices and not a rogue devi
 Consider implementing a device list that shows all registered devices with their safety numbers:
 ```
 Bob's Devices:
-  Phone (registered Jan 15)  - Safety: 4a7b 2c3d ...
-  Laptop (registered Jan 20) - Safety: 9f1e 8d2c ...
-  Tablet (registered Feb 1)  - Safety: 3b5a 7c4e ...
+ Phone (registered Jan 15) - Safety: 4a7b 2c3d ...
+ Laptop (registered Jan 20) - Safety: 9f1e 8d2c ...
+ Tablet (registered Feb 1) - Safety: 3b5a 7c4e ...
 ```
 
 **How to test:**
@@ -479,10 +478,10 @@ Signal uses Sender Keys for group chats. WhatsApp adopted the same approach. The
 
 **Where to start reading:**
 
-- `backend/app/api/rooms.py:38-132` creates rooms with participants. This is where group support starts.
-- `backend/app/core/encryption/double_ratchet.py:96-109` has the chain key derivation (`_kdf_ck`) which is the same pattern used in Sender Keys (single-direction chain)
-- `backend/app/core/websocket_manager.py:155-175` `broadcast_to_room` sends to all room members
-- `frontend/src/crypto/primitives.ts:224-259` AES-GCM encryption works for sender key messages too
+- `backend/app/api/rooms.py` creates rooms with participants. This is where group support starts.
+- `frontend/src/crypto/double-ratchet.ts` has the chain key derivation (`_kdf_ck`) which is the same pattern used in Sender Keys (single-direction chain)
+- `backend/app/core/websocket_manager.py` `broadcast_to_room` sends to all room members
+- `frontend/src/crypto/frontend/src/crypto/primitives.ts` AES-GCM encryption works for sender key messages too
 
 **Implementation phases:**
 
@@ -498,52 +497,52 @@ Create these tables in SurrealDB:
 
 ```
 sender_keys {
-    group_id: string,
-    user_id: string,
-    chain_key: bytes,
-    chain_iteration: int,
-    signing_public_key: bytes,
-    created_at: datetime
+ group_id: string,
+ user_id: string,
+ chain_key: bytes,
+ chain_iteration: int,
+ signing_public_key: bytes,
+ created_at: datetime
 }
 
 group_members {
-    group_id: string,
-    user_id: string,
-    role: string,   // "admin" | "member"
-    joined_at: datetime
+ group_id: string,
+ user_id: string,
+ role: string, // "admin" | "member"
+ joined_at: datetime
 }
 ```
 
 **Phase 3: Implementation**
 
 1. **Group creation:** When Alice creates a group with Bob and Carol:
-   - Alice generates a sender key pair: `(chain_key_alice, signing_key_alice)`
-   - Alice sends her sender key to Bob via their existing 1:1 encrypted channel (Double Ratchet)
-   - Alice sends her sender key to Carol the same way
-   - Bob and Carol do the same (each distributes their sender key to all other members)
-   - Result: each member has N-1 sender keys (one per other member)
+ - Alice generates a sender key pair: `(chain_key_alice, signing_key_alice)`
+ - Alice sends her sender key to Bob via their existing 1:1 encrypted channel (Double Ratchet)
+ - Alice sends her sender key to Carol the same way
+ - Bob and Carol do the same (each distributes their sender key to all other members)
+ - Result: each member has N-1 sender keys (one per other member)
 
 2. **Sending a message:** Alice encrypts the group message:
-   - Derive message key: `message_key = HMAC-SHA256(chain_key, 0x01)`
-   - Advance chain: `chain_key = HMAC-SHA256(chain_key, 0x02)`
-   - Encrypt: `ciphertext = AES-GCM(message_key, plaintext)`
-   - Sign: `signature = Ed25519.sign(signing_key, ciphertext)`
-   - Broadcast ciphertext + signature + chain_iteration to the group
+ - Derive message key: `message_key = HMAC-SHA256(chain_key, 0x01)`
+ - Advance chain: `chain_key = HMAC-SHA256(chain_key, 0x02)`
+ - Encrypt: `ciphertext = AES-GCM(message_key, plaintext)`
+ - Sign: `signature = Ed25519.sign(signing_key, ciphertext)`
+ - Broadcast ciphertext + signature + chain_iteration to the group
 
 3. **Receiving a message:** Bob decrypts:
-   - Look up Alice's sender key by `(group_id, sender_id)`
-   - If `chain_iteration > local_iteration`: advance chain key to catch up
-   - Derive the message key, decrypt, verify signature
+ - Look up Alice's sender key by `(group_id, sender_id)`
+ - If `chain_iteration > local_iteration`: advance chain key to catch up
+ - Derive the message key, decrypt, verify signature
 
 4. **Member removal:** When Carol is removed:
-   - Alice generates a NEW sender key pair
-   - Alice distributes the new sender key to Bob (but NOT Carol)
-   - Bob does the same
-   - Carol still has the old sender keys but they are no longer used
+ - Alice generates a NEW sender key pair
+ - Alice distributes the new sender key to Bob (but NOT Carol)
+ - Bob does the same
+ - Carol still has the old sender keys but they are no longer used
 
 5. **Member addition:** When Dave joins:
-   - All existing members distribute their current sender keys to Dave via 1:1 channels
-   - Dave generates and distributes his sender key to all members
+ - All existing members distribute their current sender keys to Dave via 1:1 channels
+ - Dave generates and distributes his sender key to all members
 
 **Key rotation strategy:**
 
@@ -592,22 +591,22 @@ The threat model that motivates this is "harvest now, decrypt later." An adversa
 
 **Where to start reading:**
 
-- `backend/app/core/encryption/x3dh_manager.py:208-281` is `perform_x3dh_sender`. This is the exact function you will modify.
-- `backend/app/core/encryption/x3dh_manager.py:241-255` is where the DH shared secrets are combined:
-  ```python
-  dh1 = alice_ik_private.exchange(bob_spk_public)      # line 241
-  dh2 = alice_ek_private.exchange(bob_ik_public)         # line 242
-  dh3 = alice_ek_private.exchange(bob_spk_public)        # line 243
-  # dh4 = alice_ek_private.exchange(bob_opk_public)      # line 251 (optional)
-  key_material = dh1 + dh2 + dh3 [+ dh4]
-  ```
-- `backend/app/core/encryption/x3dh_manager.py:257-264` is where HKDF derives the shared key:
-  ```python
-  f = b'\xff' * X25519_KEY_SIZE
-  hkdf = HKDF(algorithm=hashes.SHA256(), length=X25519_KEY_SIZE,
-               salt=b'\x00' * X25519_KEY_SIZE, info=b'X3DH')
-  shared_key = hkdf.derive(f + key_material)
-  ```
+- `frontend/src/crypto/x3dh.ts` is `perform_x3dh_sender`. This is the exact function you will modify.
+- `frontend/src/crypto/x3dh.ts` is where the DH shared secrets are combined:
+ ```python
+ dh1 = alice_ik_private.exchange(bob_spk_public)
+ dh2 = alice_ek_private.exchange(bob_ik_public)
+ dh3 = alice_ek_private.exchange(bob_spk_public)
+ # dh4 = alice_ek_private.exchange(bob_opk_public) (optional)
+ key_material = dh1 + dh2 + dh3 [+ dh4]
+ ```
+- `frontend/src/crypto/x3dh.ts` is where HKDF derives the shared key:
+ ```python
+ f = b'\xff' * X25519_KEY_SIZE
+ hkdf = HKDF(algorithm=hashes.SHA256, length=X25519_KEY_SIZE,
+ salt=b'\x00' * X25519_KEY_SIZE, info=b'X3DH')
+ shared_key = hkdf.derive(f + key_material)
+ ```
 - `backend/pyproject.toml:30` already includes `liboqs-python>=0.14.1` in dependencies
 
 **The hybrid approach:**
@@ -618,9 +617,9 @@ The key insight is that you combine BOTH classical and post-quantum shared secre
 - Both must be broken simultaneously to compromise the session
 
 ```
-Classical:    SK_classical = HKDF(DH1 || DH2 || DH3 [|| DH4])
+Classical: SK_classical = HKDF(DH1 || DH2 || DH3 [|| DH4])
 Post-quantum: SK_pq = Kyber.Decapsulate(ciphertext, secret_key)
-Combined:     SK = HKDF(SK_classical || SK_pq, info=b'PQXDH')
+Combined: SK = HKDF(SK_classical || SK_pq, info=b'PQXDH')
 ```
 
 **Implementation phases:**
@@ -640,27 +639,27 @@ Understand the difference between a KEM (Key Encapsulation Mechanism) and a DH e
 
 **Phase 2: Prekey bundle extension**
 
-1. Add a `kyber_public_key` field to the `PreKeyBundle` dataclass at `x3dh_manager.py:34-42`
-2. When generating prekeys (`prekey_service.py:152-219`), also generate a Kyber keypair using `liboqs-python`:
-   ```python
-   import oqs
-   kem = oqs.KeyEncapsulation("Kyber768")
-   kyber_public = kem.generate_keypair()
-   kyber_private = kem.export_secret_key()
-   ```
+1. Add a `kyber_public_key` field to the `PreKeyBundle` dataclass at `frontend/src/crypto/x3dh.ts`
+2. When generating prekeys (`backend/app/services/prekey_service.py`), also generate a Kyber keypair using `liboqs-python`:
+ ```python
+ import oqs
+ kem = oqs.KeyEncapsulation("Kyber768")
+ kyber_public = kem.generate_keypair
+ kyber_private = kem.export_secret_key
+ ```
 3. Store the Kyber public key in the prekey bundle, private key in the database
 
 **Phase 3: X3DH extension**
 
-Modify `perform_x3dh_sender` at `x3dh_manager.py:208-281`:
+Modify `perform_x3dh_sender` at `frontend/src/crypto/x3dh.ts`:
 
-1. After computing the classical `key_material` (line 252-255), check if the bundle includes a Kyber key
+1. After computing the classical `key_material` , check if the bundle includes a Kyber key
 2. If yes: encapsulate against the Kyber public key to get `(pq_shared_secret, pq_ciphertext)`
 3. Concatenate: `combined_material = key_material + pq_shared_secret`
 4. Change the HKDF info parameter: `info=b'PQXDH'` (to distinguish from classical sessions)
 5. Include `pq_ciphertext` in the `X3DHResult` so it can be sent to the recipient
 
-Modify `perform_x3dh_receiver` at `x3dh_manager.py:283-350`:
+Modify `perform_x3dh_receiver` at `frontend/src/crypto/x3dh.ts`:
 
 1. After computing the classical key material, check if a PQ ciphertext was provided
 2. If yes: decapsulate to recover `pq_shared_secret`
@@ -668,7 +667,7 @@ Modify `perform_x3dh_receiver` at `x3dh_manager.py:283-350`:
 
 **Phase 4: Backwards compatibility**
 
-If the peer does not have a Kyber public key in their prekey bundle (they have not upgraded), fall back to classical-only X3DH. The code path at `x3dh_manager.py:246-255` already handles the optional one-time prekey with an if/else. Use the same pattern for Kyber.
+If the peer does not have a Kyber public key in their prekey bundle (they have not upgraded), fall back to classical-only X3DH. The code path at `frontend/src/crypto/x3dh.ts` already handles the optional one-time prekey with an if/else. Use the same pattern for Kyber.
 
 **Key sizes to be aware of:**
 - X25519 public key: 32 bytes
@@ -702,43 +701,43 @@ This challenge implements true cryptographic deletion: the ciphertext remains in
 
 **Where to start reading:**
 
-- `backend/app/core/encryption/double_ratchet.py:96-109` is `_kdf_ck` which derives message keys. Each message gets a unique key.
-- `backend/app/core/encryption/double_ratchet.py:215-244` is `_store_skipped_message_keys` with eviction logic at line 232-234. This is the pattern you will extend for TTL-based eviction.
-- `backend/app/core/encryption/double_ratchet.py:246-258` is `_evict_oldest_skipped_keys` which deletes keys.
-- `frontend/src/crypto/key-store.ts:353-358` stores ratchet state in IndexedDB
-- `frontend/src/crypto/primitives.ts:294-298` has `generateRandomBytes` using `crypto.getRandomValues`
+- `frontend/src/crypto/double-ratchet.ts` is `_kdf_ck` which derives message keys. Each message gets a unique key.
+- `frontend/src/crypto/double-ratchet.ts` is `_store_skipped_message_keys` with eviction logic -234. This is the pattern you will extend for TTL-based eviction.
+- `frontend/src/crypto/double-ratchet.ts` is `_evict_oldest_skipped_keys` which deletes keys.
+- `frontend/src/crypto/key-store.ts` stores ratchet state in IndexedDB
+- `frontend/src/crypto/frontend/src/crypto/primitives.ts` has `generateRandomBytes` using `crypto.getRandomValues`
 
 **Implementation approach:**
 
 1. **Conversation setting:** Add a per-conversation setting: `disappear_after_seconds`. Values: 0 (disabled), 30, 300, 3600, 86400, 604800. Store this in the room metadata in SurrealDB.
 
 2. **Message key storage with TTL:** When a message is encrypted, the message key is normally discarded after encryption. For disappearing messages, the RECIPIENT stores the message key in IndexedDB with a TTL:
-   ```
-   {
-     message_id: "msg_abc123",
-     message_key: <32 bytes>,
-     created_at: "2025-01-15T14:30:00Z",
-     expires_at: "2025-01-15T15:30:00Z"  // created_at + disappear_after_seconds
-   }
-   ```
+ ```
+ {
+ message_id: "msg_abc123",
+ message_key: <32 bytes>,
+ created_at: "2025-01-15T14:30:00Z",
+ expires_at: "2025-01-15T15:30:00Z" // created_at + disappear_after_seconds
+ }
+ ```
 
 3. **Timer starts on read, not on send.** The recipient's timer starts when they first decrypt the message. If the recipient is offline for a week, they still get the full timer duration after reading.
 
 4. **Key destruction:** When the timer expires:
-   - Frontend: overwrite the key material with random bytes before deleting from IndexedDB. In JavaScript: `crypto.getRandomValues(keyBuffer)` then delete.
-   - Backend: if you store message keys server-side (for the deprecated server-side encryption path), overwrite with `os.urandom(32)` then delete.
+ - Frontend: overwrite the key material with random bytes before deleting from IndexedDB. In JavaScript: `crypto.getRandomValues(keyBuffer)` then delete.
+ - Backend: just delete the SurrealDB row. The server holds no keys, so there's nothing to wipe — but the recipient's locally-cached plaintext (and message key, if it's still in the skipped-key cache) needs to be overwritten on the client.
 
 5. **UI changes:**
-   - Show a countdown timer on disappearing messages
-   - After expiration, replace the message content with "[Message expired]"
-   - The ciphertext remains in SurrealDB but is now permanently unreadable
+ - Show a countdown timer on disappearing messages
+ - After expiration, replace the message content with "[Message expired]"
+ - The ciphertext remains in SurrealDB but is now permanently unreadable
 
 **The hard parts:**
 
 - What happens if the recipient never reads the message? The sender's copy should still eventually disappear. Implement a "maximum lifetime" that triggers regardless of read status.
 - What about screenshots? You cannot prevent them. This is a social problem, not a technical one. Signal shows a notification when a screenshot is taken (on mobile), but this is best-effort.
 - JavaScript garbage collection does not guarantee memory is wiped. When you overwrite a `Uint8Array`, the old values may still exist in memory until the GC reclaims the page. True secure deletion in JavaScript is not possible. Document this limitation.
-- The skipped message key cache (`double_ratchet.py:47-49`) stores keys for out-of-order messages. These must also respect the TTL.
+- The skipped message key cache (`frontend/src/crypto/double-ratchet.ts`) stores keys for out-of-order messages. These must also respect the TTL.
 
 **How to test:**
 - Enable disappearing messages (30 second timer) in a conversation
@@ -759,9 +758,9 @@ This challenge implements true cryptographic deletion: the ciphertext remains in
 
 **What to build:** Implement deniable authentication so that neither Alice nor Bob can prove to a third party that the other sent a specific message. This is a privacy property of the Signal Protocol that most implementations skip or get wrong.
 
-**Prerequisites:** Solid understanding of the X3DH implementation at `x3dh_manager.py:56-353`
+**Prerequisites:** Solid understanding of the X3DH implementation at `frontend/src/crypto/x3dh.ts`
 
-**Why it matters:** In the current implementation, if Alice has Bob's signed messages (ciphertext + authentication tags), she could potentially show them to a third party to prove Bob said something. This is because the associated data (`x3dh_manager.py:272`) binds both identity keys to the session: `associated_data = alice_ik_public_bytes + bob_ik_public_bytes`.
+**Why it matters:** In the current implementation, if Alice has Bob's signed messages (ciphertext + authentication tags), she could potentially show them to a third party to prove Bob said something. This is because the associated data (`frontend/src/crypto/x3dh.ts`) binds both identity keys to the session: `associated_data = alice_ik_public_bytes + bob_ik_public_bytes`.
 
 Deniable authentication means that Alice could have forged the messages herself (because she also has the shared secret), so they are not valid cryptographic proof of Bob's authorship. This matters for journalists, activists, whistleblowers, and anyone who might be legally compelled to prove message authorship.
 
@@ -773,9 +772,9 @@ In a deniable protocol, the authentication MAC can be computed by EITHER party, 
 
 **Where to start reading:**
 
-- `x3dh_manager.py:272` is the associated data computation: `associated_data = alice_ik_public_bytes + bob_ik_public_bytes`
-- `double_ratchet.py:323-362` is `encrypt_message` where associated data is used in AES-GCM
-- `double_ratchet.py:364-416` is `decrypt_message` which verifies the authentication tag
+- `frontend/src/crypto/x3dh.ts` is the associated data computation: `associated_data = alice_ik_public_bytes + bob_ik_public_bytes`
+- `frontend/src/crypto/double-ratchet.ts` is `encrypt_message` where associated data is used in AES-GCM
+- `frontend/src/crypto/double-ratchet.ts` is `decrypt_message` which verifies the authentication tag
 
 **Implementation approach:**
 
@@ -783,7 +782,7 @@ In a deniable protocol, the authentication MAC can be computed by EITHER party, 
 
 2. Alternatively, implement a "triple DH" variant where you add a third DH: `DH5 = IK_A x IK_B`. This creates a shared secret that only requires Alice and Bob's identity keys. Since both parties can compute it, a transcript of messages authenticated with this secret is not proof against either party.
 
-3. The associated data modification at `x3dh_manager.py:272` and the corresponding line at `x3dh_manager.py:341` must change in tandem (sender and receiver must produce the same associated data).
+3. The associated data modification at `frontend/src/crypto/x3dh.ts` and the corresponding line at `frontend/src/crypto/x3dh.ts` must change in tandem (sender and receiver must produce the same associated data).
 
 **How to verify deniability:**
 
@@ -810,31 +809,31 @@ WhatsApp solved this with Google Drive/iCloud backups encrypted with a user pass
 **Planning questions you must answer before writing code:**
 
 1. What key material needs to be backed up?
-   - Identity keys (X25519 + Ed25519 private keys)
-   - Active ratchet states for each conversation
-   - Signed prekey private keys
-   - Message history (optional, large)
+ - Identity keys (X25519 + Ed25519 private keys)
+ - Active ratchet states for each conversation
+ - Signed prekey private keys
+ - Message history (optional, large)
 
 2. How is the backup encrypted?
-   - Option A: User PIN/password -> Argon2id -> AES-256-GCM key
-   - Option B: Random backup key displayed as a 24-word recovery phrase
-   - Option C: Server-side HSM with rate limiting (Signal's SVR approach, requires hardware)
+ - Option A: User PIN/password -> Argon2id -> AES-256-GCM key
+ - Option B: Random backup key displayed as a 24-word recovery phrase
+ - Option C: Server-side HSM with rate limiting (Signal's SVR approach, requires hardware)
 
 3. Where is the backup stored?
-   - Server-side (encrypted blob in PostgreSQL or object storage)
-   - User-exported file (like Signal's plaintext export, but encrypted)
+ - Server-side (encrypted blob in PostgreSQL or object storage)
+ - User-exported file (like Signal's plaintext export, but encrypted)
 
 4. How do you handle backup key loss?
-   - Unrecoverable by design (most secure)
-   - Social recovery (N-of-M trusted contacts must approve, like Shamir's Secret Sharing)
-   - Server-side recovery with identity verification (weakest, requires trusting the server)
+ - Unrecoverable by design (most secure)
+ - Social recovery (N-of-M trusted contacts must approve, like Shamir's Secret Sharing)
+ - Server-side recovery with identity verification (weakest, requires trusting the server)
 
 **Where to start reading:**
 
-- `frontend/src/crypto/key-store.ts:85-99` saves identity keys to IndexedDB. This is the data that needs backing up.
-- `frontend/src/crypto/key-store.ts:353-358` saves ratchet states
-- `frontend/src/crypto/key-store.ts:392-412` `clearAllKeys()` deletes everything on logout
-- `frontend/src/crypto/message-store.ts:61-67` saves decrypted messages
+- `frontend/src/crypto/key-store.ts` saves identity keys to IndexedDB. This is the data that needs backing up.
+- `frontend/src/crypto/key-store.ts` saves ratchet states
+- `frontend/src/crypto/key-store.ts` `clearAllKeys` deletes everything on logout
+- `frontend/src/crypto/message-store.ts` saves decrypted messages
 
 **Implementation phases:**
 
@@ -843,28 +842,28 @@ WhatsApp solved this with Google Drive/iCloud backups encrypted with a user pass
 Define a JSON schema for the backup:
 ```json
 {
-  "version": 1,
-  "created_at": "2025-01-15T14:30:00Z",
-  "identity_keys": {
-    "x25519_private": "<base64>",
-    "x25519_public": "<base64>",
-    "ed25519_private": "<base64>",
-    "ed25519_public": "<base64>"
-  },
-  "ratchet_states": [
-    {
-      "peer_id": "bob-uuid",
-      "root_key": "<base64>",
-      "sending_chain_key": "<base64>",
-      "receiving_chain_key": "<base64>",
-      "dh_private_key": "<base64>",
-      "dh_peer_public_key": "<base64>",
-      "sending_message_number": 42,
-      "receiving_message_number": 37,
-      "previous_sending_chain_length": 12
-    }
-  ],
-  "messages": []
+ "version": 1,
+ "created_at": "2025-01-15T14:30:00Z",
+ "identity_keys": {
+ "x25519_private": "<base64>",
+ "x25519_public": "<base64>",
+ "ed25519_private": "<base64>",
+ "ed25519_public": "<base64>"
+ },
+ "ratchet_states": [
+ {
+ "peer_id": "bob-uuid",
+ "root_key": "<base64>",
+ "sending_chain_key": "<base64>",
+ "receiving_chain_key": "<base64>",
+ "dh_private_key": "<base64>",
+ "dh_peer_public_key": "<base64>",
+ "sending_message_number": 42,
+ "receiving_message_number": 37,
+ "previous_sending_chain_length": 12
+ }
+ ],
+ "messages": []
 }
 ```
 
@@ -935,7 +934,7 @@ Build a corporate messaging system with compliance features (backup and recovery
 
 ### Optimize Ratchet State Storage
 
-The current implementation serializes the entire ratchet state to PostgreSQL on every single message. Look at `message_service.py:208-267` (`_save_ratchet_state_to_db`). Every call to `send_encrypted_message` or `decrypt_received_message` triggers a full ratchet state write with `await session.commit()` at line 258.
+The current implementation serializes the entire ratchet state to PostgreSQL on every single message. Look at `backend/app/services/message_service.py` (`_save_ratchet_state_to_db`). Every call to `send_encrypted_message` or `decrypt_received_message` triggers a full ratchet state write with `await session.commit` .
 
 This is a bottleneck. For a conversation with rapid back-and-forth messaging, you are writing to PostgreSQL twice per message (once for encrypt, once for decrypt).
 
@@ -945,7 +944,7 @@ This is a bottleneck. For a conversation with rapid back-and-forth messaging, yo
 1. On first ratchet state load, cache it in Redis with a key like `ratchet:{user_id}:{peer_user_id}`
 2. After each ratchet advance, write to Redis only (sub-millisecond)
 3. Periodically (every 10 messages or every 30 seconds) flush to PostgreSQL (durable storage)
-4. On WebSocket disconnect (`websocket_manager.py:97-133`), flush all cached states to PostgreSQL
+4. On WebSocket disconnect (`websocket_manager.py`), flush all cached states to PostgreSQL
 5. On startup, load from PostgreSQL (Redis is not durable across restarts)
 
 **Measurement:** Benchmark messages per second before and after with a simple load test. Target: greater than 100 messages per second per conversation.
@@ -955,27 +954,27 @@ This is a bottleneck. For a conversation with rapid back-and-forth messaging, yo
 **Detailed profiling steps:**
 
 1. Add timing instrumentation around `_save_ratchet_state_to_db`:
-   ```python
-   import time
-   start = time.perf_counter()
-   await session.commit()
-   elapsed_ms = (time.perf_counter() - start) * 1000
-   logger.info("Ratchet state save: %.2fms", elapsed_ms)
-   ```
+ ```python
+ import time
+ start = time.perf_counter
+ await session.commit
+ elapsed_ms = (time.perf_counter - start) * 1000
+ logger.info("Ratchet state save: %.2fms", elapsed_ms)
+ ```
 
 2. Run a load test: two users exchanging 1000 messages as fast as possible. Measure:
-   - Average time per `_save_ratchet_state_to_db` call
-   - Average time per `_load_ratchet_state_from_db` call
-   - Total messages per second (end-to-end)
-   - PostgreSQL connection pool utilization (`DB_POOL_SIZE` at `config.py:118`)
+ - Average time per `_save_ratchet_state_to_db` call
+ - Average time per `_load_ratchet_state_from_db` call
+ - Total messages per second (end-to-end)
+ - PostgreSQL connection pool utilization (`DB_POOL_SIZE` at `config.py`)
 
 3. Implement Redis caching, repeat the same load test, compare.
 
 **Redis cache schema:**
 ```
-Key:   ratchet:{user_id}:{peer_user_id}
+Key: ratchet:{user_id}:{peer_user_id}
 Value: JSON serialized ratchet state
-TTL:   300 seconds (auto-expire as safety net)
+TTL: 300 seconds (auto-expire as safety net)
 ```
 
 On each ratchet advance, write to Redis. Every 10 messages OR every 30 seconds, flush to PostgreSQL. On disconnect, flush immediately.
@@ -990,13 +989,13 @@ Use `locust` or `k6` to load test the WebSocket layer. Determine how many concur
 1. Maximum concurrent WebSocket connections before memory exhaustion
 2. Message throughput: messages per second at 100, 500, 1000, 5000 concurrent connections
 3. Latency: p50, p95, p99 message delivery latency at various connection counts
-4. Identify the bottleneck: Is it CPU (from encryption operations)? Memory (from connection pool at `websocket_manager.py:39`)? I/O (from SurrealDB writes)? Python GIL contention?
+4. Identify the bottleneck: Is it CPU (from encryption operations)? Memory (from connection pool at `websocket_manager.py`)? I/O (from SurrealDB writes)? Python GIL contention?
 
 **Target:** Document the breaking point and propose a horizontal scaling strategy.
 
 **Scaling considerations:**
 
-The current architecture has a single `ConnectionManager` instance at `websocket_manager.py:296` holding all WebSocket connections in memory (`self.active_connections: dict[UUID, list[WebSocket]]`). This does not scale horizontally because connections on Server A are invisible to Server B.
+The current architecture has a single `ConnectionManager` instance at `websocket_manager.py` holding all WebSocket connections in memory (`self.active_connections: dict[UUID, list[WebSocket]]`). This does not scale horizontally because connections on Server A are invisible to Server B.
 
 To scale to multiple server instances:
 1. Use Redis Pub/Sub for cross-instance message routing. When Server A needs to send a message to a user connected to Server B, it publishes to a Redis channel. Server B subscribes and forwards to the local WebSocket.
@@ -1007,22 +1006,25 @@ To scale to multiple server instances:
 **Load test script outline (k6):**
 ```javascript
 import ws from 'k6/ws';
-export default function () {
-  const url = 'ws://localhost:8000/ws?user_id=...';
-  const res = ws.connect(url, {}, function (socket) {
-    socket.on('open', () => {
-      socket.send(JSON.stringify({
-        type: 'encrypted_message',
-        recipient_id: '...',
-        room_id: '...',
-        ciphertext: '...',
-        nonce: '...',
-        header: '...'
-      }));
-    });
-    socket.on('message', (msg) => {});
-    socket.setTimeout(() => socket.close(), 30000);
-  });
+export default function {
+ // The server expects a session cookie; load tests should sign in first
+ // and pass the cookie via params.headers.Cookie.
+ const url = 'ws://localhost:8000/ws';
+ const params = { headers: { Cookie: 'chat_session=<session-token>' } };
+ const res = ws.connect(url, params, function (socket) {
+ socket.on('open', => {
+ socket.send(JSON.stringify({
+ type: 'encrypted_message',
+ recipient_id: '...',
+ room_id: '...',
+ ciphertext: '...',
+ nonce: '...',
+ header: '...'
+ }));
+ });
+ socket.on('message', (msg) => {});
+ socket.setTimeout( => socket.close, 30000);
+ });
 }
 ```
 
@@ -1038,7 +1040,7 @@ Run with: `k6 run --vus 100 --duration 60s load_test.js`
 
 Build a system where identity key changes are logged to a verifiable append-only log, similar to Certificate Transparency for TLS certificates. This prevents the server from silently swapping identity keys to perform a man-in-the-middle attack.
 
-Currently, the server at `prekey_service.py:293-361` serves prekey bundles. A compromised server could serve a fake identity key (its own), perform X3DH with both parties, and relay decrypted messages. The users would not know.
+Currently, the server at `backend/app/services/prekey_service.py` serves prekey bundles. A compromised server could serve a fake identity key (its own), perform X3DH with both parties, and relay decrypted messages. The users would not know.
 
 A key transparency log makes this detectable: every identity key is logged, and clients can audit the log to verify their key has not been replaced.
 
@@ -1062,13 +1064,13 @@ Perform a manual security audit of the X3DH and Double Ratchet implementations. 
 
 **Audit checklist:**
 
-1. **HKDF parameter usage** (`x3dh_manager.py:258-264`): Is the salt correct? Is the info string distinct between different uses? Are the output lengths appropriate?
+1. **HKDF parameter usage** (`frontend/src/crypto/x3dh.ts`): Is the salt correct? Is the info string distinct between different uses? Are the output lengths appropriate?
 
-2. **Nonce generation** (`double_ratchet.py:122`): Is `os.urandom(AES_GCM_NONCE_SIZE)` called for every encryption? Is there any risk of nonce reuse?
+2. **Nonce generation** (`frontend/src/crypto/double-ratchet.ts`): Is `os.urandom(AES_GCM_NONCE_SIZE)` called for every encryption? Is there any risk of nonce reuse?
 
-3. **WebCrypto API usage** (`primitives.ts:224-259`): Is the `iv` parameter always fresh? Are `additionalData` bindings correct? Are key usages properly restricted?
+3. **WebCrypto API usage** (`frontend/src/crypto/primitives.ts`): Is the `iv` parameter always fresh? Are `additionalData` bindings correct? Are key usages properly restricted?
 
-4. **Timing side channels**: Look at `primitives.ts:388-397` (`constantTimeEqual`). Is this actually constant time in JavaScript? (Spoiler: the `if (a.length !== b.length) return false` on line 389 is an early return that leaks length information. Is this a problem in context?)
+4. **Timing side channels**: Look at `frontend/src/crypto/primitives.ts` (`constantTimeEqual`). Is this actually constant time in JavaScript? (Spoiler: the `if (a.length !== b.length) return false` is an early return that leaks length information. Is this a problem in context?)
 
 5. **Random number generation**: Verify that all randomness comes from `os.urandom` (Python) or `crypto.getRandomValues` (JavaScript). Search for any use of `random` or `Math.random`.
 
@@ -1082,7 +1084,7 @@ Write a report documenting your findings.
 
 Build a system where the server does not know who sent a message, only who it is for. Signal implemented this as "Sealed Sender."
 
-Currently, the WebSocket endpoint at `websocket.py:25-84` receives messages from authenticated users. The server knows `sender_id` (from the WebSocket connection) and `recipient_id` (from the message payload). It stores both in SurrealDB (`message_service.py:292-302`).
+Currently, the WebSocket endpoint at `websocket.py` receives messages from authenticated users. The server knows `sender_id` (from the WebSocket connection) and `recipient_id` (from the message payload). It stores both in SurrealDB (`backend/app/services/message_service.py`).
 
 With Sealed Sender, the sender identity is encrypted inside the E2E encrypted payload. The server only sees the recipient (needed for routing). The sender is revealed only after the recipient decrypts.
 
@@ -1097,22 +1099,22 @@ This requires the server to have its own keypair (separate from any user), and c
 1. Generate a server X25519 keypair on startup. Publish the server's public key at a well-known endpoint: `GET /api/.well-known/server-key`.
 
 2. Modify the client message sending flow:
-   - Construct the inner payload: the normal E2E encrypted message (ciphertext, nonce, header) PLUS `sender_id` in plaintext
-   - Encrypt the inner payload with the intended recipient's ratchet (as currently done)
-   - Construct the outer envelope: `{recipient_id: "bob-uuid", sealed_payload: "<encrypted inner>"}`
-   - Encrypt the outer envelope with the server's public key (simple X25519 + AES-GCM)
-   - Send only the outer ciphertext over the WebSocket
+ - Construct the inner payload: the normal E2E encrypted message (ciphertext, nonce, header) PLUS `sender_id` in plaintext
+ - Encrypt the inner payload with the intended recipient's ratchet (as currently done)
+ - Construct the outer envelope: `{recipient_id: "bob-uuid", sealed_payload: "<encrypted inner>"}`
+ - Encrypt the outer envelope with the server's public key (simple X25519 + AES-GCM)
+ - Send only the outer ciphertext over the WebSocket
 
 3. Modify the server routing:
-   - Decrypt the outer envelope using the server's private key
-   - Read `recipient_id` from the decrypted envelope
-   - Forward `sealed_payload` to the recipient
-   - The server never sees `sender_id`
+ - Decrypt the outer envelope using the server's private key
+ - Read `recipient_id` from the decrypted envelope
+ - Forward `sealed_payload` to the recipient
+ - The server never sees `sender_id`
 
 4. Modify the recipient decryption:
-   - Decrypt the sealed payload using the E2E ratchet
-   - Extract `sender_id` from the decrypted content
-   - Display the message with the correct sender attribution
+ - Decrypt the sealed payload using the E2E ratchet
+ - Extract `sender_id` from the decrypted content
+ - Display the message with the correct sender attribution
 
 **Limitation:** The server still knows the recipient (it needs to for routing). And it knows the sender's IP address and WebSocket connection. True sender anonymity requires additional measures like Tor or mix networks. Sealed Sender hides sender identity from the server's message logs, not from network-level observation.
 
@@ -1133,17 +1135,17 @@ Use Hypothesis (Python) to write property-based tests for the cryptographic impl
 
 **Properties to verify:**
 
-1. **X3DH symmetry:** For any two valid identity key pairs and any valid prekey bundle, `perform_x3dh_sender` and `perform_x3dh_receiver` produce the same `shared_key`. Reference: `x3dh_manager.py:208-281` and `x3dh_manager.py:283-350`.
+1. **X3DH symmetry:** For any two valid identity key pairs and any valid prekey bundle, `perform_x3dh_sender` and `perform_x3dh_receiver` produce the same `shared_key`. Reference: `frontend/src/crypto/x3dh.ts` and `frontend/src/crypto/x3dh.ts`.
 
-2. **Double Ratchet round-trip:** For any sequence of plaintext messages in any order, encrypting with `encrypt_message` and decrypting with `decrypt_message` always returns the original plaintext. Reference: `double_ratchet.py:323-362` and `double_ratchet.py:364-416`.
+2. **Double Ratchet round-trip:** For any sequence of plaintext messages in any order, encrypting with `encrypt_message` and decrypting with `decrypt_message` always returns the original plaintext. Reference: `frontend/src/crypto/double-ratchet.ts` and `frontend/src/crypto/double-ratchet.ts`.
 
-3. **AES-GCM round-trip:** For any plaintext and any valid key, `aesGcmEncrypt` followed by `aesGcmDecrypt` returns the original plaintext. Reference: `primitives.ts:224-292`.
+3. **AES-GCM round-trip:** For any plaintext and any valid key, `aesGcmEncrypt` followed by `aesGcmDecrypt` returns the original plaintext. Reference: `frontend/src/crypto/primitives.ts`.
 
 4. **No nonce reuse:** For N encryptions with the same key, all N nonces are distinct. (This should hold with overwhelming probability for random 12-byte nonces, but verify it empirically for N=10000.)
 
 5. **Forward secrecy:** After advancing the ratchet, old message keys cannot be derived from the new state. Generate a ratchet state, encrypt a message, advance the ratchet 100 steps, then verify that the message key from step 0 cannot be recomputed from the state at step 100.
 
-6. **Out-of-order decryption:** For any permutation of N messages, decrypting them in that permuted order produces the same set of plaintexts as decrypting in the original order. This tests the skipped message key logic at `double_ratchet.py:215-244`.
+6. **Out-of-order decryption:** For any permutation of N messages, decrypting them in that permuted order produces the same set of plaintexts as decrypting in the original order. This tests the skipped message key logic at `frontend/src/crypto/double-ratchet.ts`.
 
 **Hypothesis strategy example:**
 
@@ -1151,18 +1153,18 @@ Use Hypothesis (Python) to write property-based tests for the cryptographic impl
 from hypothesis import given, strategies as st
 
 @given(
-    message_count=st.integers(min_value=1, max_value=50),
-    delivery_order=st.permutations(range(50))  # random permutation
+ message_count=st.integers(min_value=1, max_value=50),
+ delivery_order=st.permutations(range(50)) # random permutation
 )
 def test_out_of_order_delivery(message_count, delivery_order):
-    """All messages decrypt correctly regardless of delivery order."""
-    # Generate N messages
-    # Encrypt them in order (advancing the sending ratchet)
-    # Decrypt them in the shuffled order
-    # Assert all plaintexts match the originals
+ """All messages decrypt correctly regardless of delivery order."""
+ # Generate N messages
+ # Encrypt them in order (advancing the sending ratchet)
+ # Decrypt them in the shuffled order
+ # Assert all plaintexts match the originals
 ```
 
-**Where to put the tests:** Create a `tests/` directory in the backend and structure tests as `tests/test_x3dh.py`, `tests/test_double_ratchet.py`, `tests/test_crypto_properties.py`.
+**Where to put the tests:** The crypto property tests belong in the frontend Vitest suite next to `x3dh.test.ts` and `double-ratchet.test.ts`. Add a new file like `frontend/src/crypto/properties.test.ts` for randomized round-trip and tamper checks. Reserve `backend/tests/` for backend integration tests (auth, prekey storage, session enforcement).
 
 ---
 

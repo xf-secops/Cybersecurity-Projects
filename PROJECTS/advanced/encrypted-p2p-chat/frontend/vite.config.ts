@@ -1,5 +1,5 @@
 // ===================
-// © AngelaMos | 2025
+// © AngelaMos | 2026
 // vite.config.ts
 // ===================
 
@@ -43,5 +43,9 @@ export default defineConfig({
         },
       },
     },
+  },
+  test: {
+    environment: 'node',
+    include: ['src/**/*.test.ts'],
   },
 })

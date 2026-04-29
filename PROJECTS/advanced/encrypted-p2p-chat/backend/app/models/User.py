@@ -1,6 +1,6 @@
 """
-ⒸAngelaMos | 2025
-User model for authentication stored in PostgreSQL
+©AngelaMos | 2026
+User.py
 """
 
 from typing import TYPE_CHECKING
@@ -12,7 +12,6 @@ from sqlmodel import (
 )
 from app.config import (
     DISPLAY_NAME_MAX_LENGTH,
-    PREKEY_MAX_LENGTH,
     USERNAME_MAX_LENGTH,
 )
 from app.models.Base import BaseDBModel
@@ -45,21 +44,12 @@ class User(BaseDBModel, table = True):
     is_active: bool = Field(default = True, nullable = False)
     is_verified: bool = Field(default = False, nullable = False)
 
-    credentials: list["Credential"] = Relationship(back_populates = "user")
+    webauthn_user_handle: bytes = Field(
+        nullable = False,
+        max_length = 64,
+    )
 
-    identity_key: str | None = Field(
-        default = None,
-        max_length = PREKEY_MAX_LENGTH
-    )
-    signed_prekey: str | None = Field(
-        default = None,
-        max_length = PREKEY_MAX_LENGTH
-    )
-    signed_prekey_signature: str | None = Field(
-        default = None,
-        max_length = PREKEY_MAX_LENGTH
-    )
-    one_time_prekeys: str | None = Field(default = None)
+    credentials: list["Credential"] = Relationship(back_populates = "user")
 
     def __repr__(self) -> str:
         """

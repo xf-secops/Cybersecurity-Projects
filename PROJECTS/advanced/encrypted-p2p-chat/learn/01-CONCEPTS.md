@@ -92,37 +92,37 @@ impossible for the server to read the data in the first place.
 ### How It Works (in this project)
 
 ```
-Alice's Device                    Server                     Bob's Device
-+----------------+          +----------------+          +----------------+
-|  Plaintext     |          |                |          |                |
-|  "Hello Bob"   |          |  Encrypted     |          |  Plaintext     |
-|       |        |   --->   |  blob only     |   --->   |  "Hello Bob"   |
-|       v        |          |  No keys       |          |       ^        |
-|  AES-256-GCM   |          |  No access     |          |  AES-256-GCM   |
-|  encrypt       |          |  No decrypt    |          |  decrypt       |
-+----------------+          +----------------+          +----------------+
+Alice's Device Server Bob's Device
++----------------+ +----------------+ +----------------+
+| Plaintext | | | | |
+| "Hello Bob" | | Encrypted | | Plaintext |
+| | | ---> | blob only | ---> | "Hello Bob" |
+| v | | No keys | | ^ |
+| AES-256-GCM | | No access | | AES-256-GCM |
+| encrypt | | No decrypt | | decrypt |
++----------------+ +----------------+ +----------------+
 
-Keys derived from             Server stores               Keys derived from
-Double Ratchet on            ciphertext, nonce,           Double Ratchet on
-Alice's device               and header verbatim          Bob's device
+Keys derived from Server stores Keys derived from
+Double Ratchet on ciphertext, nonce, Double Ratchet on
+Alice's device and header verbatim Bob's device
 ```
 
-On the server side, `message_service.py:269-314` implements the
-`store_encrypted_message` method. Look at the docstring on line 280:
+On the server side, `backend/app/services/message_service.py` implements the
+`store_encrypted_message` method. Look at the docstring :
 `"Stores client-encrypted message in SurrealDB (pass-through, no server encryption)"`.
 The function receives `ciphertext`, `nonce`, and `header` as strings
-from the client, and stores them directly in SurrealDB at lines 292-302
+from the client, and stores them directly in SurrealDB
 without any decryption or re-encryption step. The server is a
 passthrough. It writes what it receives and reads what it wrote. At no
 point does it import any cryptographic key or call any decryption
 function on these message parameters.
 
-On the client side, `crypto-service.ts:217-249` implements the
+On the client side, `frontend/src/crypto/crypto-service.ts` implements the
 `encrypt` method. The client calls `encryptMessage` from
-`double-ratchet.ts` at line 229, receives ciphertext and nonce, then
+`double-ratchet.ts` , receives ciphertext and nonce, then
 sends these as base64-encoded strings to the server. The plaintext
 never leaves the client's process. The actual symmetric encryption
-happens in `primitives.ts:224-259` using the WebCrypto API's AES-GCM
+happens in `frontend/src/crypto/primitives.ts` using the WebCrypto API's AES-GCM
 implementation, which runs in the browser's native cryptographic module
 rather than in JavaScript. This means the plaintext is never even
 accessible to JavaScript debugging tools during the encryption
@@ -166,21 +166,21 @@ solving a different problem:
 Signal Protocol = X3DH (initial handshake) + Double Ratchet (ongoing encryption)
 
 X3DH: "How do Alice and Bob agree on a shared secret
-       when Bob might be offline?"
+ when Bob might be offline?"
 
-       Solves the ASYNCHRONOUS key agreement problem.
-       Bob uploads prekey bundles to the server ahead of time.
-       Alice can start a conversation using Bob's prekeys
-       without Bob being online.
+ Solves the ASYNCHRONOUS key agreement problem.
+ Bob uploads prekey bundles to the server ahead of time.
+ Alice can start a conversation using Bob's prekeys
+ without Bob being online.
 
 Double Ratchet: "Once they share a secret, how do they
-                 encrypt each message with a UNIQUE key
-                 that can never be recovered?"
+ encrypt each message with a UNIQUE key
+ that can never be recovered?"
 
-                 Solves the FORWARD SECRECY and POST-COMPROMISE
-                 SECURITY problem. Every message gets its own
-                 ephemeral encryption key. Compromising one key
-                 does not reveal past or future messages.
+ Solves the FORWARD SECRECY and POST-COMPROMISE
+ SECURITY problem. Every message gets its own
+ ephemeral encryption key. Compromising one key
+ does not reveal past or future messages.
 ```
 
 X3DH runs once at the start of a conversation. The Double Ratchet runs
@@ -227,9 +227,9 @@ cryptographic identity. It is generated once and kept for the lifetime
 of the account. This project generates two identity keypairs per user:
 
 - An X25519 keypair for Diffie-Hellman operations
-  (ref: `x3dh_manager.py:60-86`)
+ (ref: `frontend/src/crypto/x3dh.ts`)
 - An Ed25519 keypair for digital signatures
-  (ref: `x3dh_manager.py:88-114`)
+ (ref: `frontend/src/crypto/x3dh.ts`)
 
 The X25519 keypair participates directly in the DH calculations. The
 Ed25519 keypair signs the signed prekey to prove it belongs to the same
@@ -244,10 +244,10 @@ their identity.
 
 The signed prekey is an X25519 keypair that rotates periodically. In
 this project, rotation happens every 48 hours as configured at
-`config.py:76` (`SIGNED_PREKEY_ROTATION_HOURS=48`).
+`config.py` (`SIGNED_PREKEY_ROTATION_HOURS=48`).
 
-When a new SPK is generated (`x3dh_manager.py:116-152`), the public
-key is signed using the Ed25519 identity key at line 141:
+When a new SPK is generated (`frontend/src/crypto/x3dh.ts`), the public
+key is signed using the Ed25519 identity key :
 `signature = identity_private.sign(spk_public_bytes)`. This signature
 proves that the SPK was created by the holder of the identity key. When
 Alice downloads Bob's prekey bundle, she verifies this signature before
@@ -260,24 +260,23 @@ computed with them become unrecoverable). Longer rotation means fewer
 key management operations and less complexity. The 48-hour window used
 here is consistent with Signal's recommendation.
 
-Old signed prekeys are retained for 7 days after deactivation
-(`config.py:77`, `SIGNED_PREKEY_RETENTION_DAYS=7`) to allow
-messages-in-flight that were encrypted against the old SPK to still be
-decrypted. After that retention period,
-`prekey_service.py:428-465` (`cleanup_old_signed_prekeys`) deletes them
-permanently.
+Old signed prekeys are kept around (with `is_active = False`) so
+messages-in-flight that were encrypted against the previous SPK can
+still complete their initial X3DH on the receiver. There is no
+automated reaper in this codebase; pruning very old inactive SPKs is a
+suggested extension in `04-CHALLENGES.md`.
 
 **One-Time Prekey (OPK) -- Single use, consumed and deleted**
 
 One-time prekeys are X25519 keypairs that are used exactly once and then
 discarded. They are generated in batches
-(ref: `x3dh_manager.py:154-174` for generation,
-`prekey_service.py:363-407` for batch replenishment) and uploaded to the
+(ref: `frontend/src/crypto/x3dh.ts` for generation,
+`backend/app/services/prekey_service.py` for batch replenishment) and uploaded to the
 server.
 
 When Alice initiates a conversation with Bob, the server gives Alice one
 of Bob's unused OPKs and marks it as consumed
-(`prekey_service.py:331-338`). This OPK participates in the fourth DH
+(`backend/app/services/prekey_service.py`). This OPK participates in the fourth DH
 operation (DH4) of the X3DH handshake. Because the OPK is used only
 once and then deleted, it provides an additional layer of forward
 secrecy specifically for the initial message of a conversation.
@@ -287,7 +286,7 @@ other users initiating conversations), X3DH falls back to three DH
 operations instead of four. The protocol still works, but the initial
 message has slightly weaker forward secrecy because the fourth DH
 operation is skipped. The system generates 100 OPKs initially
-(`config.py:75`, `DEFAULT_ONE_TIME_PREKEY_COUNT=100`) and replenishes
+(`config.py`, `DEFAULT_ONE_TIME_PREKEY_COUNT=100`) and replenishes
 them when the supply drops below half.
 
 **Ephemeral Key (EK) -- Generated per session, never stored**
@@ -297,11 +296,11 @@ sender) at the moment she initiates a conversation. It is used in DH2,
 DH3, and DH4 of the X3DH handshake. It is never stored on disk; it
 exists only in memory for the duration of the key exchange computation.
 
-In the code, it is generated at `x3dh_manager.py:227-228`:
+In the code, it is generated at `frontend/src/crypto/x3dh.ts`:
 
 ```python
-alice_ek_private = X25519PrivateKey.generate()
-alice_ek_public = alice_ek_private.public_key()
+alice_ek_private = X25519PrivateKey.generate
+alice_ek_public = alice_ek_private.public_key
 ```
 
 After the shared secret is computed, Alice sends the ephemeral public
@@ -319,34 +318,34 @@ The four secrets are concatenated and fed into HKDF to produce the final
 shared key.
 
 ```
-Alice (sender) has:                  Bob (receiver) has:
-  IK_A  (identity private key)        IK_B  (identity public key)
-  EK_A  (ephemeral, just generated)   SPK_B (signed prekey public)
-                                       OPK_B (one-time prekey public)
+Alice (sender) has: Bob (receiver) has:
+ IK_A (identity private key) IK_B (identity public key)
+ EK_A (ephemeral, just generated) SPK_B (signed prekey public)
+ OPK_B (one-time prekey public)
 
 DH Operations (each produces 32 bytes):
 
-  DH1 = X25519(IK_A_private,  SPK_B_public)
-         Alice's identity  x  Bob's signed prekey
+ DH1 = X25519(IK_A_private, SPK_B_public)
+ Alice's identity x Bob's signed prekey
 
-  DH2 = X25519(EK_A_private,  IK_B_public)
-         Alice's ephemeral x  Bob's identity
+ DH2 = X25519(EK_A_private, IK_B_public)
+ Alice's ephemeral x Bob's identity
 
-  DH3 = X25519(EK_A_private,  SPK_B_public)
-         Alice's ephemeral x  Bob's signed prekey
+ DH3 = X25519(EK_A_private, SPK_B_public)
+ Alice's ephemeral x Bob's signed prekey
 
-  DH4 = X25519(EK_A_private,  OPK_B_public)    [optional]
-         Alice's ephemeral x  Bob's one-time prekey
+ DH4 = X25519(EK_A_private, OPK_B_public) [optional]
+ Alice's ephemeral x Bob's one-time prekey
 
 Key Material Derivation:
 
-  input     = 0xFF * 32 || DH1 || DH2 || DH3 || DH4
-  salt      = 0x00 * 32
-  info      = "X3DH"
-  SK        = HKDF-SHA256(salt, input, info, length=32)
+ input = 0xFF * 32 || DH1 || DH2 || DH3 || DH4
+ salt = 0x00 * 32
+ info = "X3DH"
+ SK = HKDF-SHA256(salt, input, info, length=32)
 ```
 
-In the codebase, the sender side is at `x3dh_manager.py:241-264`:
+In the codebase, the sender side is at `frontend/src/crypto/x3dh.ts`:
 
 - Line 241: `dh1 = alice_ik_private.exchange(bob_spk_public)` -- DH1
 - Line 242: `dh2 = alice_ek_private.exchange(bob_ik_public)` -- DH2
@@ -355,15 +354,15 @@ In the codebase, the sender side is at `x3dh_manager.py:241-264`:
 - Line 252: `key_material = dh1 + dh2 + dh3 + dh4` -- concatenation
 - Lines 257-264: HKDF derivation with `0xFF * 32` prefix and `b'X3DH'` info string
 
-The receiver side at `x3dh_manager.py:308-333` performs the same
+The receiver side at `frontend/src/crypto/x3dh.ts` performs the same
 operations but with the roles reversed. DH1 becomes
-`bob_spk_private.exchange(alice_ik_public)` (line 308), because Bob has
+`bob_spk_private.exchange(alice_ik_public)` , because Bob has
 the SPK private key and Alice's IK public key. The property of
 Diffie-Hellman guarantees that `X25519(a_priv, B_pub)` produces the
 same result as `X25519(b_priv, A_pub)`, so both sides compute identical
 shared secrets.
 
-The `0xFF * 32` prefix prepended at line 257 (`f = b'\xff' * X25519_KEY_SIZE`)
+The `0xFF * 32` prefix prepended (`f = b'\xff' * X25519_KEY_SIZE`)
 is a fixed padding specified by the X3DH standard. It ensures the HKDF
 input is at least 32 bytes long even in edge cases and provides domain
 separation from other uses of the same keys.
@@ -422,20 +421,20 @@ Before performing any DH operations, Alice must verify that Bob's signed
 prekey actually belongs to Bob. A malicious server could substitute its
 own SPK and intercept communications.
 
-The verification happens at `x3dh_manager.py:217-220` inside
+The verification happens at `frontend/src/crypto/x3dh.ts` inside
 `perform_x3dh_sender`:
 
 ```python
 if not self.verify_signed_prekey(bob_bundle.signed_prekey,
-                                 bob_bundle.signed_prekey_signature,
-                                 bob_identity_public_ed25519):
-    raise ValueError("Invalid signed prekey signature")
+ bob_bundle.signed_prekey_signature,
+ bob_identity_public_ed25519):
+ raise ValueError("Invalid signed prekey signature")
 ```
 
-The `verify_signed_prekey` method at `x3dh_manager.py:176-206` uses
+The `verify_signed_prekey` method at `frontend/src/crypto/x3dh.ts` uses
 Ed25519 signature verification. It decodes the SPK public key bytes, the
 signature bytes, and the Ed25519 identity public key bytes, then calls
-`identity_public.verify(signature_bytes, spk_public_bytes)` at line 196.
+`identity_public.verify(signature_bytes, spk_public_bytes)` .
 Ed25519 verification either succeeds or raises `InvalidSignature`. If
 verification fails, the entire X3DH handshake is aborted.
 
@@ -465,15 +464,15 @@ The Double Ratchet provides two critical security properties that go
 beyond what a static shared key could provide:
 
 1. **Forward secrecy** -- Compromising a current key does not expose
-   past messages. Even if an attacker steals the current encryption key,
-   they cannot derive previous keys and therefore cannot decrypt earlier
-   messages.
+ past messages. Even if an attacker steals the current encryption key,
+ they cannot derive previous keys and therefore cannot decrypt earlier
+ messages.
 
 2. **Post-compromise security (break-in recovery)** -- After a key
-   compromise, future messages become secure again once a new DH ratchet
-   step occurs. If an attacker temporarily gains access to key material,
-   they lose access to the conversation as soon as the keys advance
-   through a new Diffie-Hellman exchange.
+ compromise, future messages become secure again once a new DH ratchet
+ step occurs. If an attacker temporarily gains access to key material,
+ they lose access to the conversation as soon as the keys advance
+ through a new Diffie-Hellman exchange.
 
 The name "Double Ratchet" refers to the fact that it combines two
 ratcheting mechanisms: a **DH ratchet** (Diffie-Hellman ratchet) that
@@ -487,18 +486,18 @@ the sending chain, and the receiving chain.
 
 ```
 Root Chain (KDF_RK)
-  |
-  |-- [DH ratchet step] --> new root key + new chain key
-  |
-  +-- Sending Chain (KDF_CK)
-  |     |-- advance --> Message Key 1 --> Encrypt msg 1
-  |     |-- advance --> Message Key 2 --> Encrypt msg 2
-  |     +-- advance --> Message Key 3 --> Encrypt msg 3
-  |
-  +-- Receiving Chain (KDF_CK)
-        |-- advance --> Message Key 1 --> Decrypt msg 1
-        |-- advance --> Message Key 2 --> Decrypt msg 2
-        +-- advance --> Message Key 3 --> Decrypt msg 3
+ |
+ |-- [DH ratchet step] --> new root key + new chain key
+ |
+ +-- Sending Chain (KDF_CK)
+ | |-- advance --> Message Key 1 --> Encrypt msg 1
+ | |-- advance --> Message Key 2 --> Encrypt msg 2
+ | +-- advance --> Message Key 3 --> Encrypt msg 3
+ |
+ +-- Receiving Chain (KDF_CK)
+ |-- advance --> Message Key 1 --> Decrypt msg 1
+ |-- advance --> Message Key 2 --> Decrypt msg 2
+ +-- advance --> Message Key 3 --> Decrypt msg 3
 ```
 
 Each chain is a sequence of key derivation operations. The root chain
@@ -515,20 +514,20 @@ The root chain advances during a DH ratchet step. It takes the current
 root key and a fresh DH output (from a new DH key exchange) and
 produces a new root key and a new chain key.
 
-Reference: `double_ratchet.py:79-94`
+Reference: `frontend/src/crypto/double-ratchet.ts`
 
 ```python
 def _kdf_rk(self, root_key: bytes, dh_output: bytes) -> tuple[bytes, bytes]:
-    hkdf = HKDF(
-        algorithm = hashes.SHA256(),
-        length = HKDF_OUTPUT_SIZE * 2,    # 64 bytes total
-        salt = root_key,                   # current root key as salt
-        info = b'',
-    )
-    output = hkdf.derive(dh_output)
-    new_root_key = output[: HKDF_OUTPUT_SIZE]    # first 32 bytes
-    new_chain_key = output[HKDF_OUTPUT_SIZE :]   # last 32 bytes
-    return new_root_key, new_chain_key
+ hkdf = HKDF(
+ algorithm = hashes.SHA256,
+ length = HKDF_OUTPUT_SIZE * 2, # 64 bytes total
+ salt = root_key, # current root key as salt
+ info = b'',
+ )
+ output = hkdf.derive(dh_output)
+ new_root_key = output[: HKDF_OUTPUT_SIZE] # first 32 bytes
+ new_chain_key = output[HKDF_OUTPUT_SIZE :] # last 32 bytes
+ return new_root_key, new_chain_key
 ```
 
 HKDF-SHA256 is used with the current root key as the salt and the DH
@@ -543,19 +542,19 @@ and the message chains.
 The symmetric chains advance with every message. Each step takes the
 current chain key and produces the next chain key and a message key.
 
-Reference: `double_ratchet.py:96-109`
+Reference: `frontend/src/crypto/double-ratchet.ts`
 
 ```python
 def _kdf_ck(self, chain_key: bytes) -> tuple[bytes, bytes]:
-    h_chain = hmac.HMAC(chain_key, hashes.SHA256())
-    h_chain.update(b'\x01')
-    next_chain_key = h_chain.finalize()
+ h_chain = hmac.HMAC(chain_key, hashes.SHA256)
+ h_chain.update(b'\x01')
+ next_chain_key = h_chain.finalize
 
-    h_message = hmac.HMAC(chain_key, hashes.SHA256())
-    h_message.update(b'\x02')
-    message_key = h_message.finalize()
+ h_message = hmac.HMAC(chain_key, hashes.SHA256)
+ h_message.update(b'\x02')
+ message_key = h_message.finalize
 
-    return next_chain_key, message_key
+ return next_chain_key, message_key
 ```
 
 Two separate HMAC-SHA256 computations are performed using the same chain
@@ -563,8 +562,8 @@ key but with different constants:
 
 ```
 chain_key --+-- HMAC(chain_key, 0x01) --> next_chain_key (kept for future)
-            |
-            +-- HMAC(chain_key, 0x02) --> message_key    (used once, discarded)
+ |
+ +-- HMAC(chain_key, 0x02) --> message_key (used once, discarded)
 ```
 
 The use of different constants (0x01 and 0x02) is essential. If the same
@@ -598,18 +597,18 @@ KDF_RK.
 Message flow and DH ratchet steps:
 
 Alice sends msgs 1,2,3 using DH keypair A1:
-  A1 --> msg1(mk1), msg2(mk2), msg3(mk3)
-  [symmetric ratchet advances 3 times, same DH key]
+ A1 --> msg1(mk1), msg2(mk2), msg3(mk3)
+ [symmetric ratchet advances 3 times, same DH key]
 
 Bob receives, generates new DH keypair B1, sends reply:
-  DH ratchet: root_key' = KDF_RK(root_key, DH(B1_priv, A1_pub))
-  B1 --> msg4(mk1'), msg5(mk2')
-  [new chain, new keys, A1 compromise no longer helps]
+ DH ratchet: root_key' = KDF_RK(root_key, DH(B1_priv, A1_pub))
+ B1 --> msg4(mk1'), msg5(mk2')
+ [new chain, new keys, A1 compromise no longer helps]
 
 Alice receives, generates new DH keypair A2, sends reply:
-  DH ratchet: root_key'' = KDF_RK(root_key', DH(A2_priv, B1_pub))
-  A2 --> msg6(mk1''), msg7(mk2'')
-  [new chain again, B1 compromise no longer helps]
+ DH ratchet: root_key'' = KDF_RK(root_key', DH(A2_priv, B1_pub))
+ A2 --> msg6(mk1''), msg7(mk2'')
+ [new chain again, B1 compromise no longer helps]
 ```
 
 Each DH ratchet step introduces fresh random entropy (from the newly
@@ -618,20 +617,20 @@ even if an attacker had compromised all previous key material, the new
 DH exchange produces a shared secret they cannot predict, and all
 subsequent keys are secure again.
 
-The implementation spans `double_ratchet.py:155-213`:
+The implementation spans `frontend/src/crypto/double-ratchet.ts`:
 
-- `_dh_ratchet_send` (lines 155-176): Called when the sender needs to
-  advance the ratchet. Generates a new DH keypair at line 159, performs
-  DH with the peer's public key at line 169, and derives new root and
-  sending chain keys at lines 171-174.
+- `_dh_ratchet_send` : Called when the sender needs to
+ advance the ratchet. Generates a new DH keypair , performs
+ DH with the peer's public key , and derives new root and
+ sending chain keys .
 
-- `_dh_ratchet_receive` (lines 178-213): Called when a received message
-  contains a new DH public key. Updates the peer public key at line 189,
-  performs DH with the existing private key to derive a new receiving
-  chain key at lines 195-198, then generates a new private key at line
-  200 and performs another DH to derive a new sending chain key at lines
-  208-211. This double DH step on the receiver side ensures both
-  receiving and sending chains are updated.
+- `_dh_ratchet_receive` : Called when a received message
+ contains a new DH public key. Updates the peer public key ,
+ performs DH with the existing private key to derive a new receiving
+ chain key , then generates a new private key at line
+ 200 and performs another DH to derive a new sending chain key at lines
+ 208-211. This double DH step on the receiver side ensures both
+ receiving and sending chains are updated.
 
 ### Out-of-Order Message Handling
 
@@ -644,17 +643,17 @@ Internet messages can arrive out of order. If Alice sends messages 1, 2,
 4. Derive mk3 and decrypt message 3
 
 The skipped message key mechanism handles this. Reference:
-`double_ratchet.py:215-277`.
+`frontend/src/crypto/double-ratchet.ts`.
 
-`_store_skipped_message_keys` (lines 215-244) is called when the
+`_store_skipped_message_keys` is called when the
 received message number is greater than the expected message number. It
 iterates through the gap, deriving and caching each skipped message key:
 
 ```python
 chain_key = state.receiving_chain_key
 for msg_num in range(state.receiving_message_number, until_message_number):
-    chain_key, message_key = self._kdf_ck(chain_key)
-    state.skipped_message_keys[(dh_public_key, msg_num)] = message_key
+ chain_key, message_key = self._kdf_ck(chain_key)
+ state.skipped_message_keys[(dh_public_key, msg_num)] = message_key
 state.receiving_chain_key = chain_key
 ```
 
@@ -663,24 +662,24 @@ message_number)`. This tuple key is necessary because message numbers
 reset with each DH ratchet step: message 0 under DH key A1 is different
 from message 0 under DH key A2.
 
-`_try_skipped_message_key` (lines 260-277) checks whether a received
+`_try_skipped_message_key` checks whether a received
 message matches a previously cached skipped key. If it does, the cached
 key is used for decryption and then removed from the cache (it is
-consumed by `dict.pop()` at line 270).
+consumed by `dict.pop` ).
 
 Security limits prevent abuse. An attacker who sends messages with
 enormous message numbers could force the ratchet to derive and store
 millions of keys, exhausting memory. Two limits are enforced:
 
-- `MAX_SKIP_MESSAGE_KEYS = 1000` (`config.py:73`): No more than 1000
-  message keys can be skipped in a single gap. If a message arrives
-  claiming to be message number 5000 when we expect message 0, the
-  decryption is rejected at lines 226-230.
+- `MAX_SKIP_MESSAGE_KEYS = 1000` (`config.py`): No more than 1000
+ message keys can be skipped in a single gap. If a message arrives
+ claiming to be message number 5000 when we expect message 0, the
+ decryption is rejected .
 
-- `MAX_CACHED_MESSAGE_KEYS = 2000` (`config.py:74`): The total number
-  of cached skipped keys across all ratchet epochs. If the cache is
-  full, the oldest keys are evicted at lines 232-234 via
-  `_evict_oldest_skipped_keys`.
+- `MAX_CACHED_MESSAGE_KEYS = 2000` (`config.py`): The total number
+ of cached skipped keys across all ratchet epochs. If the cache is
+ full, the oldest keys are evicted via
+ `_evict_oldest_skipped_keys`.
 
 ### Forward Secrecy Proof
 
@@ -691,25 +690,25 @@ Assume at message N, an attacker steals the current chain_key_N.
 
 ```
 What the attacker CAN compute (forward direction):
-  chain_key_N -----> HMAC(chain_key_N, 0x01) = chain_key_N+1
-  chain_key_N+1 ---> HMAC(chain_key_N+1, 0x01) = chain_key_N+2
-  ... and so on for all future chain keys
+ chain_key_N -----> HMAC(chain_key_N, 0x01) = chain_key_N+1
+ chain_key_N+1 ---> HMAC(chain_key_N+1, 0x01) = chain_key_N+2
+ ... and so on for all future chain keys
 
 What the attacker CANNOT compute (backward direction):
-  chain_key_N  <-/-- chain_key_N-1
+ chain_key_N <-/-- chain_key_N-1
 
-  Why? Because HMAC is a one-way function.
+ Why? Because HMAC is a one-way function.
 
-  chain_key_N = HMAC(chain_key_N-1, 0x01)
+ chain_key_N = HMAC(chain_key_N-1, 0x01)
 
-  Given chain_key_N, you cannot solve for chain_key_N-1.
-  This would require inverting HMAC-SHA256, which is
-  computationally infeasible (preimage resistance).
+ Given chain_key_N, you cannot solve for chain_key_N-1.
+ This would require inverting HMAC-SHA256, which is
+ computationally infeasible (preimage resistance).
 
 Therefore:
-  message_key_N-1 = HMAC(chain_key_N-1, 0x02)  <-- UNREACHABLE
-  message_key_N-2 = HMAC(chain_key_N-2, 0x02)  <-- UNREACHABLE
-  message_key_1   = HMAC(chain_key_1, 0x02)     <-- UNREACHABLE
+ message_key_N-1 = HMAC(chain_key_N-1, 0x02) <-- UNREACHABLE
+ message_key_N-2 = HMAC(chain_key_N-2, 0x02) <-- UNREACHABLE
+ message_key_1 = HMAC(chain_key_1, 0x02) <-- UNREACHABLE
 ```
 
 The attacker can decrypt messages N+1, N+2, N+3, and so on (until the
@@ -752,46 +751,46 @@ The encryption flow is:
 
 1. The Double Ratchet derives a message key (32 bytes) via KDF_CK
 2. A random 12-byte nonce is generated using `os.urandom` (backend) or
-   `crypto.getRandomValues` (frontend)
+ `crypto.getRandomValues` (frontend)
 3. AES-256-GCM encrypts the plaintext using the message key and nonce
 4. Associated data (sender and recipient identifiers) is authenticated
-   but not encrypted
+ but not encrypted
 5. The output is ciphertext + a 16-byte authentication tag (GCM appends
-   the tag to the ciphertext)
+ the tag to the ciphertext)
 
-Backend implementation at `double_ratchet.py:111-130`:
+Backend implementation at `frontend/src/crypto/double-ratchet.ts`:
 
 ```python
 def _encrypt_with_message_key(self, message_key, plaintext, associated_data):
-    aesgcm = AESGCM(message_key)
-    nonce = os.urandom(AES_GCM_NONCE_SIZE)   # 12 bytes from config.py:69
-    ciphertext = aesgcm.encrypt(nonce, plaintext, associated_data)
-    return nonce, ciphertext
+ aesgcm = AESGCM(message_key)
+ nonce = os.urandom(AES_GCM_NONCE_SIZE) # 12 bytes from config.py
+ ciphertext = aesgcm.encrypt(nonce, plaintext, associated_data)
+ return nonce, ciphertext
 ```
 
-Backend decryption at `double_ratchet.py:132-153` catches `InvalidTag`
-exceptions (line 151), which indicate that the ciphertext was tampered
+Backend decryption at `frontend/src/crypto/double-ratchet.ts` catches `InvalidTag`
+exceptions , which indicate that the ciphertext was tampered
 with, the wrong key was used, or the associated data does not match.
 The error is re-raised as `ValueError("Message tampered or corrupted")`
-at line 153.
+.
 
-Frontend implementation at `primitives.ts:224-259` uses the WebCrypto
+Frontend implementation at `frontend/src/crypto/primitives.ts` uses the WebCrypto
 API:
 
 ```typescript
 const nonce = generateRandomBytes(AES_GCM_NONCE_SIZE)
 const ciphertext = await subtle.encrypt(
-  {
-    name: "AES-GCM",
-    iv: nonce.buffer,
-    additionalData: associatedData?.buffer,
-  },
-  cryptoKey,
-  plaintext.buffer
+ {
+ name: "AES-GCM",
+ iv: nonce.buffer,
+ additionalData: associatedData?.buffer,
+ },
+ cryptoKey,
+ plaintext.buffer
 )
 ```
 
-Frontend decryption at `primitives.ts:261-292` mirrors this with
+Frontend decryption at `frontend/src/crypto/primitives.ts` mirrors this with
 `subtle.decrypt`. The WebCrypto API throws a `DOMException` if
 authentication fails, which is functionally equivalent to the Python
 `InvalidTag` exception.
@@ -817,12 +816,12 @@ security reason to prefer CBC over GCM for new implementations.
 
 ### Parameters
 
-As defined in `config.py:68-70`:
+As defined in `config.py`:
 
 ```
-AES_GCM_KEY_SIZE    = 32   (256 bits)    line 68
-AES_GCM_NONCE_SIZE  = 12   (96 bits)     line 69
-HKDF_OUTPUT_SIZE    = 32   (256 bits)    line 70
+AES_GCM_KEY_SIZE = 32 (256 bits)
+AES_GCM_NONCE_SIZE = 12 (96 bits)
+HKDF_OUTPUT_SIZE = 32 (256 bits)
 ```
 
 The 12-byte (96-bit) nonce is the recommended size for GCM. Longer
@@ -913,44 +912,44 @@ and you cannot forge a signature without the private key.
 
 ```
 Step 1: Client requests registration options
-  Client ----> POST /auth/register/begin ----> Server
+ Client ----> POST /auth/register/begin ----> Server
 
-  Server:
-    - Generates 32-byte random challenge (secrets.token_bytes)
-    - Stores challenge in Redis with 10-minute TTL
-    - Returns WebAuthn PublicKeyCredentialCreationOptions
+ Server:
+ - Generates 32-byte random challenge (secrets.token_bytes)
+ - Stores challenge in Redis with 10-minute TTL
+ - Returns WebAuthn PublicKeyCredentialCreationOptions
 
 Step 2: Browser creates credential
-  Browser ----> navigator.credentials.create(options) ----> Authenticator
+ Browser ----> navigator.credentials.create(options) ----> Authenticator
 
-  Authenticator:
-    - Prompts user for biometric/PIN verification
-    - Generates new ECDSA or EdDSA keypair
-    - Stores private key internally (NEVER exported)
-    - Returns attestation object (signed credential public key)
+ Authenticator:
+ - Prompts user for biometric/PIN verification
+ - Generates new ECDSA or EdDSA keypair
+ - Stores private key internally (NEVER exported)
+ - Returns attestation object (signed credential public key)
 
 Step 3: Client sends attestation for verification
-  Client ----> POST /auth/register/complete ----> Server
+ Client ----> POST /auth/register/complete ----> Server
 
-  Server:
-    - Verifies attestation signature
-    - Verifies challenge matches stored value
-    - Extracts credential public key and credential ID
-    - Stores PUBLIC KEY + credential ID in PostgreSQL
-    - Deletes challenge from Redis
-    - Private key STAYS on authenticator -- server never sees it
+ Server:
+ - Verifies attestation signature
+ - Verifies challenge matches stored value
+ - Extracts credential public key and credential ID
+ - Stores PUBLIC KEY + credential ID in PostgreSQL
+ - Deletes challenge from Redis
+ - Private key STAYS on authenticator -- server never sees it
 ```
 
-Implementation reference: `passkey_manager.py:55-94`
-(`generate_registration_options`). At line 65, a 32-byte challenge is
+Implementation reference: `backend/app/core/passkey/passkey_manager.py`
+(`generate_registration_options`). a 32-byte challenge is
 generated: `challenge = secrets.token_bytes(WEBAUTHN_CHALLENGE_BYTES)`.
 At lines 74-87, the WebAuthn options are constructed with RP
 configuration, user information, and authenticator requirements. The
-authenticator selection at lines 82-85 specifies
+authenticator selection specifies
 `ResidentKeyRequirement.REQUIRED`, which forces creation of a
 discoverable credential (passkey).
 
-Registration verification at `passkey_manager.py:96-130`
+Registration verification at `backend/app/core/passkey/passkey_manager.py`
 (`verify_registration`) calls `verify_registration_response` at lines
 105-110, which validates the attestation object, checks the challenge,
 verifies the RP ID, and confirms the origin.
@@ -959,40 +958,40 @@ verifies the RP ID, and confirms the origin.
 
 ```
 Step 1: Client requests authentication options
-  Client ----> POST /auth/authenticate/begin ----> Server
+ Client ----> POST /auth/authenticate/begin ----> Server
 
-  Server:
-    - Generates new 32-byte challenge
-    - Stores challenge in Redis with 10-minute TTL
-    - Returns WebAuthn PublicKeyCredentialRequestOptions
+ Server:
+ - Generates new 32-byte challenge
+ - Stores challenge in Redis with 10-minute TTL
+ - Returns WebAuthn PublicKeyCredentialRequestOptions
 
 Step 2: Browser signs challenge
-  Browser ----> navigator.credentials.get(options) ----> Authenticator
+ Browser ----> navigator.credentials.get(options) ----> Authenticator
 
-  Authenticator:
-    - Prompts user for biometric/PIN
-    - Signs challenge with stored private key
-    - Increments signature counter
-    - Returns assertion (signed challenge + counter)
+ Authenticator:
+ - Prompts user for biometric/PIN
+ - Signs challenge with stored private key
+ - Increments signature counter
+ - Returns assertion (signed challenge + counter)
 
 Step 3: Client sends assertion for verification
-  Client ----> POST /auth/authenticate/complete ----> Server
+ Client ----> POST /auth/authenticate/complete ----> Server
 
-  Server:
-    - Retrieves stored public key from PostgreSQL
-    - Verifies signature using stored public key
-    - Verifies challenge matches stored value
-    - Checks signature counter INCREASED (clone detection!)
-    - Updates stored counter value
-    - Returns authenticated session
+ Server:
+ - Retrieves stored public key from PostgreSQL
+ - Verifies signature using stored public key
+ - Verifies challenge matches stored value
+ - Checks signature counter INCREASED (clone detection!)
+ - Updates stored counter value
+ - Returns authenticated session
 ```
 
-Implementation reference: `passkey_manager.py:132-160`
-(`generate_authentication_options`). At line 139, a fresh challenge is
+Implementation reference: `backend/app/core/passkey/passkey_manager.py`
+(`generate_authentication_options`). a fresh challenge is
 generated. At lines 148-153, WebAuthn authentication options are
 constructed.
 
-Authentication verification at `passkey_manager.py:162-207`
+Authentication verification at `backend/app/core/passkey/passkey_manager.py`
 (`verify_authentication`). At lines 173-180, the assertion is verified
 against the expected challenge, RP ID, origin, and stored credential
 public key. The critical clone detection check follows.
@@ -1009,26 +1008,26 @@ If the server receives an assertion with a counter value that has not
 increased (or has decreased), it indicates one of two things:
 
 1. The authenticator hardware was cloned (its key material was
-   extracted and loaded onto a second device)
+ extracted and loaded onto a second device)
 2. A replay attack is being attempted
 
 Both scenarios are security incidents that warrant blocking
 authentication and alerting the user.
 
-Reference: `passkey_manager.py:184-193`:
+Reference: `backend/app/core/passkey/passkey_manager.py`:
 
 ```python
 if (credential_current_sign_count != 0 and new_sign_count != 0
-        and new_sign_count <= credential_current_sign_count):
-    logger.error(
-        "Signature counter did not increase: current=%s, new=%s. "
-        "Possible cloned authenticator detected!",
-        credential_current_sign_count,
-        new_sign_count
-    )
-    raise ValueError(
-        "Signature counter anomaly detected - potential cloned authenticator"
-    )
+ and new_sign_count <= credential_current_sign_count):
+ logger.error(
+ "Signature counter did not increase: current=%s, new=%s. "
+ "Possible cloned authenticator detected!",
+ credential_current_sign_count,
+ new_sign_count
+ )
+ raise ValueError(
+ "Signature counter anomaly detected - potential cloned authenticator"
+ )
 ```
 
 The conditions `credential_current_sign_count != 0` and
@@ -1043,17 +1042,17 @@ support signature counters.
 
 ## Constant-Time Comparison
 
-A detail worth calling out: `primitives.ts:388-397` implements a
+A detail worth calling out: `frontend/src/crypto/primitives.ts` implements a
 constant-time byte array comparison:
 
 ```typescript
 export function constantTimeEqual(a: Uint8Array, b: Uint8Array): boolean {
-  if (a.length !== b.length) return false
-  let result = 0
-  for (let i = 0; i < a.length; i++) {
-    result |= a[i] ^ b[i]
-  }
-  return result === 0
+ if (a.length !== b.length) return false
+ let result = 0
+ for (let i = 0; i < a.length; i++) {
+ result |= a[i] ^ b[i]
+ }
+ return result === 0
 }
 ```
 
@@ -1080,72 +1079,72 @@ the full security architecture of the application:
 
 ```
 +-----------------------------------------------------------+
-|                    AUTHENTICATION LAYER                     |
-|                                                             |
-|  WebAuthn/Passkeys                                          |
-|    |                                                        |
-|    +--> User identity established                           |
-|    +--> No password to steal, phish, or brute force         |
-|    +--> Clone detection via signature counter                |
-|         |                                                   |
-|         v                                                   |
-|  +----------------------------------------------------+    |
-|  |              KEY AGREEMENT LAYER                    |    |
-|  |                                                     |    |
-|  |  X3DH Key Exchange                                  |    |
-|  |    +--> Asynchronous (works when peer is offline)   |    |
-|  |    +--> 4 DH operations for mutual authentication   |    |
-|  |    +--> Produces initial shared secret (32 bytes)   |    |
-|  |         |                                           |    |
-|  |         v                                           |    |
-|  |  Double Ratchet Initialization                      |    |
-|  |    +--> Shared secret becomes root key              |    |
-|  |    +--> Sending and receiving chains created        |    |
-|  +----------------------------------------------------+    |
-|         |                                                   |
-|         v                                                   |
-|  +----------------------------------------------------+    |
-|  |            MESSAGE ENCRYPTION LAYER                 |    |
-|  |                                                     |    |
-|  |  Double Ratchet (ongoing)                           |    |
-|  |    +--> KDF_CK derives per-message keys             |    |
-|  |    +--> DH ratchet provides post-compromise security|    |
-|  |    +--> Skipped key cache handles out-of-order msgs |    |
-|  |         |                                           |    |
-|  |         v                                           |    |
-|  |  AES-256-GCM                                        |    |
-|  |    +--> Encrypts plaintext with message key         |    |
-|  |    +--> Random 12-byte nonce per message            |    |
-|  |    +--> Authentication tag detects tampering        |    |
-|  +----------------------------------------------------+    |
-|         |                                                   |
-|         v                                                   |
-|  +----------------------------------------------------+    |
-|  |              TRANSPORT LAYER                        |    |
-|  |                                                     |    |
-|  |  WebSocket (real-time delivery)                     |    |
-|  |    +--> Carries encrypted blobs between clients     |    |
-|  |    +--> Server sees only ciphertext + metadata      |    |
-|  |                                                     |    |
-|  |  SurrealDB (persistence)                            |    |
-|  |    +--> Stores encrypted messages at rest           |    |
-|  |    +--> No decryption capability on server          |    |
-|  +----------------------------------------------------+    |
+| AUTHENTICATION LAYER |
+| |
+| WebAuthn/Passkeys |
+| | |
+| +--> User identity established |
+| +--> No password to steal, phish, or brute force |
+| +--> Clone detection via signature counter |
+| | |
+| v |
+| +----------------------------------------------------+ |
+| | KEY AGREEMENT LAYER | |
+| | | |
+| | X3DH Key Exchange | |
+| | +--> Asynchronous (works when peer is offline) | |
+| | +--> 4 DH operations for mutual authentication | |
+| | +--> Produces initial shared secret (32 bytes) | |
+| | | | |
+| | v | |
+| | Double Ratchet Initialization | |
+| | +--> Shared secret becomes root key | |
+| | +--> Sending and receiving chains created | |
+| +----------------------------------------------------+ |
+| | |
+| v |
+| +----------------------------------------------------+ |
+| | MESSAGE ENCRYPTION LAYER | |
+| | | |
+| | Double Ratchet (ongoing) | |
+| | +--> KDF_CK derives per-message keys | |
+| | +--> DH ratchet provides post-compromise security| |
+| | +--> Skipped key cache handles out-of-order msgs | |
+| | | | |
+| | v | |
+| | AES-256-GCM | |
+| | +--> Encrypts plaintext with message key | |
+| | +--> Random 12-byte nonce per message | |
+| | +--> Authentication tag detects tampering | |
+| +----------------------------------------------------+ |
+| | |
+| v |
+| +----------------------------------------------------+ |
+| | TRANSPORT LAYER | |
+| | | |
+| | WebSocket (real-time delivery) | |
+| | +--> Carries encrypted blobs between clients | |
+| | +--> Server sees only ciphertext + metadata | |
+| | | |
+| | SurrealDB (persistence) | |
+| | +--> Stores encrypted messages at rest | |
+| | +--> No decryption capability on server | |
+| +----------------------------------------------------+ |
 +-----------------------------------------------------------+
 ```
 
 The layers interact in a strict top-down sequence for new conversations:
 
 1. The user authenticates with WebAuthn (proving their identity without
-   a password)
+ a password)
 2. X3DH establishes a shared secret with the peer (even if the peer is
-   offline)
+ offline)
 3. The shared secret initializes the Double Ratchet
-   (`double_ratchet.py:279-302`)
+ (`frontend/src/crypto/double-ratchet.ts`)
 4. Each message is encrypted with a unique AES-256-GCM key derived from
-   the ratchet (`double_ratchet.py:323-362`)
+ the ratchet (`frontend/src/crypto/double-ratchet.ts`)
 5. The encrypted message is transmitted via WebSocket and stored in
-   SurrealDB (`message_service.py:269-314`)
+ SurrealDB (`backend/app/services/message_service.py`)
 
 For ongoing conversations, only steps 4 and 5 repeat. The X3DH
 handshake happens once per conversation. The Double Ratchet then runs
@@ -1224,11 +1223,11 @@ well-tested implementations.
 112 bits for use through 2030+ (NIST SP 800-57 Part 1).
 
 **CWE-330: Use of Insufficiently Random Values** -- Randomness comes
-from two sources: `os.urandom()` on the backend (which reads from the
+from two sources: `os.urandom` on the backend (which reads from the
 operating system's CSPRNG -- `/dev/urandom` on Linux) and
-`crypto.getRandomValues()` on the frontend (which uses the browser's
+`crypto.getRandomValues` on the frontend (which uses the browser's
 CSPRNG). Both are cryptographically secure. Nonce generation at
-`double_ratchet.py:122` and `primitives.ts:294-297` use these
+`frontend/src/crypto/double-ratchet.ts` and `frontend/src/crypto/primitives.ts` use these
 exclusively.
 
 **CWE-311: Missing Encryption of Sensitive Data** -- All message content
@@ -1268,20 +1267,20 @@ cryptography textbook.
 server never generates or holds encryption keys for message content.
 Key generation happens in two places:
 
-1. On the backend, `x3dh_manager.py:60-86` generates X25519 identity
-   keypairs using `X25519PrivateKey.generate()`, which calls into
-   OpenSSL's random number generator. These keys are for the X3DH
-   protocol, and the private keys are stored in the database for the
-   server-side key exchange path.
+1. On the backend, `frontend/src/crypto/x3dh.ts` generates X25519 identity
+ keypairs using `X25519PrivateKey.generate`, which calls into
+ OpenSSL's random number generator. These keys are for the X3DH
+ protocol, and the private keys are stored in the database for the
+ server-side key exchange path.
 
-2. On the frontend, `primitives.ts:15-24` generates X25519 keypairs
-   using the WebCrypto API (`subtle.generateKey`), which uses the
-   browser's hardware-backed CSPRNG. In the client-side encryption
-   model, these keys never leave the browser.
+2. On the frontend, `frontend/src/crypto/primitives.ts` generates X25519 keypairs
+ using the WebCrypto API (`subtle.generateKey`), which uses the
+ browser's hardware-backed CSPRNG. In the client-side encryption
+ model, these keys never leave the browser.
 
-The `store_encrypted_message` function (`message_service.py:269-314`)
+The `store_encrypted_message` function (`backend/app/services/message_service.py`)
 receives pre-encrypted ciphertext from the client and stores it directly
-in SurrealDB at lines 292-302 without any server-side decryption. The
+in SurrealDB without any server-side decryption. The
 server's role is explicitly that of a blind relay. Even if the entire
 server infrastructure were compromised, the attacker would obtain only
 encrypted blobs with no corresponding decryption keys.
@@ -1302,7 +1301,7 @@ Ratchet combination used in this project. Each message gets a unique
 AES key through the ratchet mechanism, providing forward secrecy across
 billions of daily messages. WhatsApp's implementation stores prekey
 bundles on their servers (just as this project does via
-`prekey_service.py:293-361`), allowing asynchronous session
+`backend/app/services/prekey_service.py`), allowing asynchronous session
 establishment. The X3DH handshake is performed when a user initiates a
 new conversation, and the Double Ratchet runs continuously thereafter.
 
@@ -1315,12 +1314,12 @@ same situation occurred with FBI requests in the United States and
 government demands in India and the UK.
 
 **Connection to this project.** The X3DH implementation at
-`x3dh_manager.py:208-281` and the Double Ratchet at
-`double_ratchet.py:279-416` implement the same cryptographic operations
+`frontend/src/crypto/x3dh.ts` and the Double Ratchet at
+`frontend/src/crypto/double-ratchet.ts` implement the same cryptographic operations
 described in the Signal Protocol specification. The same four DH
-operations (lines 241-252), the same HKDF derivation (lines 257-264),
-the same KDF chain operations (lines 79-109 of double_ratchet.py), and
-the same skipped message key mechanism (lines 215-277). The protocol
+operations , the same HKDF derivation ,
+the same KDF chain operations (lines 79-109 of frontend/src/crypto/double-ratchet.ts), and
+the same skipped message key mechanism . The protocol
 specifications are public, the formal security proofs are published, and
 the implementation follows them directly.
 
@@ -1351,7 +1350,7 @@ authentication, even when the passwords are used to derive encryption
 keys.
 
 In this project's WebAuthn implementation
-(`passkey_manager.py:55-94`), there is no password. The user
+(`backend/app/core/passkey/passkey_manager.py`), there is no password. The user
 authenticates with a biometric or PIN on their authenticator device. The
 authenticator holds an ECDSA or EdDSA private key that is hardware-bound
 and never exported. If the server database is fully compromised, the
@@ -1375,27 +1374,27 @@ answer these questions. If you cannot answer one confidently, re-read the
 relevant section.
 
 1. **Why does X3DH need four separate DH operations instead of just
-   one?** What specific security property does each operation provide?
-   What attack becomes possible if any single operation is removed?
+ one?** What specific security property does each operation provide?
+ What attack becomes possible if any single operation is removed?
 
 2. **If an attacker compromises a Double Ratchet chain key at message N,
-   which messages can they decrypt?** Which messages remain protected?
-   When does the attacker lose access? Trace through the KDF_CK function
-   to prove your answer.
+ which messages can they decrypt?** Which messages remain protected?
+ When does the attacker lose access? Trace through the KDF_CK function
+ to prove your answer.
 
 3. **Why is WebAuthn resistant to phishing attacks, while traditional
-   passwords are not?** What property of the WebAuthn protocol prevents
-   a fake login page from capturing usable credentials? Hint: think
-   about what the authenticator checks before signing the challenge.
+ passwords are not?** What property of the WebAuthn protocol prevents
+ a fake login page from capturing usable credentials? Hint: think
+ about what the authenticator checks before signing the challenge.
 
 4. **What happens if Alice sends Bob messages 1, 2, 3, 4, 5 and Bob
-   receives them in order 1, 3, 5, 2, 4?** Walk through the skipped
-   message key mechanism for each received message. How many keys are
-   cached after processing message 3? After processing message 5?
+ receives them in order 1, 3, 5, 2, 4?** Walk through the skipped
+ message key mechanism for each received message. How many keys are
+ cached after processing message 3? After processing message 5?
 
 5. **Why does the Double Ratchet use two different HMAC constants (0x01
-   and 0x02) in KDF_CK?** What would go wrong if both the chain key and
-   the message key were derived with the same constant?
+ and 0x02) in KDF_CK?** What would go wrong if both the chain key and
+ the message key were derived with the same constant?
 
 
 ## Further Reading
@@ -1410,58 +1409,58 @@ relevant section.
 ### Academic Analysis
 
 - "A Formal Security Analysis of the Signal Messaging Protocol" --
-  Cohn-Gordon, Cremers, Dowling, Garratt, Stebila. IEEE EuroS&P 2017.
-  Formal proof that the Signal Protocol meets its claimed security
-  properties (authenticated key exchange, forward secrecy, post-compromise
-  security) under the Gap-DH assumption.
+ Cohn-Gordon, Cremers, Dowling, Garratt, Stebila. IEEE EuroS&P 2017.
+ Formal proof that the Signal Protocol meets its claimed security
+ properties (authenticated key exchange, forward secrecy, post-compromise
+ security) under the Gap-DH assumption.
 
 - "The Signal Protocol: A Cryptographic Analysis" -- Cohn-Gordon et al.
-  (2017). Extended version with proofs covering the X3DH and Double
-  Ratchet components individually and composed.
+ (2017). Extended version with proofs covering the X3DH and Double
+ Ratchet components individually and composed.
 
 - "On Ends-to-Ends Encryption: Asynchronous Group Messaging with Strong
-  Security Guarantees" -- Cohn-Gordon et al. IEEE S&P 2018. Extends the
-  analysis to group messaging scenarios.
+ Security Guarantees" -- Cohn-Gordon et al. IEEE S&P 2018. Extends the
+ analysis to group messaging scenarios.
 
 ### FIDO and WebAuthn
 
 - FIDO2 technical overview: https://fidoalliance.org/fido2/
 - FIDO Alliance whitepaper on passkeys:
-  https://fidoalliance.org/passkeys/
+ https://fidoalliance.org/passkeys/
 - NIST SP 800-63B Digital Identity Guidelines (authenticator types and
-  assurance levels)
+ assurance levels)
 
 ### Cryptographic Primitives
 
 - Daniel J. Bernstein, "Curve25519: new Diffie-Hellman speed records"
-  (2006) -- The paper introducing the X25519 function used for DH in
-  this project.
+ (2006) -- The paper introducing the X25519 function used for DH in
+ this project.
 
 - Daniel J. Bernstein, Niels Duif, Tanja Lange, Peter Schwabe, Bo-Yin
-  Yang, "High-speed high-security signatures" (2012) -- The paper
-  introducing Ed25519 used for signing prekeys.
+ Yang, "High-speed high-security signatures" (2012) -- The paper
+ introducing Ed25519 used for signing prekeys.
 
 - NIST SP 800-38D, "Recommendation for Block Cipher Modes of Operation:
-  Galois/Counter Mode (GCM) and GMAC" -- The specification for the
-  AES-GCM mode used for message encryption.
+ Galois/Counter Mode (GCM) and GMAC" -- The specification for the
+ AES-GCM mode used for message encryption.
 
 - Hugo Krawczyk, "Cryptographic Extraction and Key Derivation: The HKDF
-  Scheme" (2010) -- The paper behind HKDF, the key derivation function
-  used throughout the Double Ratchet.
+ Scheme" (2010) -- The paper behind HKDF, the key derivation function
+ used throughout the Double Ratchet.
 
 ### Historical Context
 
 - Nikita Borisov, Ian Goldberg, Eric Brewer, "Off-the-Record
-  Communication, or, Why Not To Use PGP" (2004) -- The OTR protocol
-  that introduced the concept of deniable, forward-secret messaging and
-  directly inspired the Signal Protocol's design.
+ Communication, or, Why Not To Use PGP" (2004) -- The OTR protocol
+ that introduced the concept of deniable, forward-secret messaging and
+ directly inspired the Signal Protocol's design.
 
 - Whitfield Diffie and Martin Hellman, "New Directions in Cryptography"
-  (1976) -- The original paper introducing public key cryptography and
-  the Diffie-Hellman key exchange that underlies X3DH.
+ (1976) -- The original paper introducing public key cryptography and
+ the Diffie-Hellman key exchange that underlies X3DH.
 
 - Phil Zimmermann and PGP: The "Crypto Wars" of the 1990s, where the
-  US government attempted to restrict the export of strong cryptography.
-  Zimmermann published PGP's source code in a printed book to circumvent
-  export controls under First Amendment protection. This history is why
-  cryptographic software can be freely distributed today.
+ US government attempted to restrict the export of strong cryptography.
+ Zimmermann published PGP's source code in a printed book to circumvent
+ export controls under First Amendment protection. This history is why
+ cryptographic software can be freely distributed today.

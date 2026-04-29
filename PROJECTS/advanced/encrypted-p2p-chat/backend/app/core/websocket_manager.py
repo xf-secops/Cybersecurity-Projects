@@ -159,19 +159,27 @@ class ConnectionManager:
                       Any]
     ) -> None:
         """
-        Broadcast message to all users in a room
+        Broadcast a message to all members of a room currently connected
         """
-        online_users = await presence_service.get_room_online_users(room_id)
+        participants = await surreal_db.get_room_participants(room_id)
 
-        for user_presence in online_users:
+        for row in participants:
+            raw_uid = row.get("user_id")
+            if not raw_uid:
+                continue
             try:
-                user_id = UUID(user_presence["user_id"])
+                user_id = UUID(str(raw_uid))
+            except ValueError:
+                continue
+            if not self.is_user_connected(user_id):
+                continue
+            try:
                 await self.send_message(user_id, message)
             except Exception as e:
                 logger.error(
                     "Failed to broadcast to user %s: %s",
-                    user_presence['user_id'],
-                    e
+                    raw_uid,
+                    e,
                 )
 
     async def _heartbeat_loop(self, websocket: WebSocket, user_id: UUID) -> None:

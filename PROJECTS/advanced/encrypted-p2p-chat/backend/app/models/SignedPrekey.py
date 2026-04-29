@@ -1,10 +1,9 @@
 """
-ⒸAngelaMos | 2025
-X3DH signed prekey model for medium term key rotation
+©AngelaMos | 2026
+SignedPrekey.py
 """
 
 from datetime import datetime
-from typing import TYPE_CHECKING
 from uuid import UUID
 
 from sqlalchemy import DateTime
@@ -13,13 +12,10 @@ from sqlmodel import Field
 from app.config import SIGNATURE_LENGTH, SIGNED_PREKEY_LENGTH
 from app.models.Base import BaseDBModel
 
-if TYPE_CHECKING:
-    pass
-
 
 class SignedPrekey(BaseDBModel, table = True):
     """
-    X25519 signed prekey rotated every 48 hours for X3DH protocol
+    X25519 signed prekey public half rotated periodically by the client
     """
     __tablename__ = "signed_prekeys"
 
@@ -33,8 +29,6 @@ class SignedPrekey(BaseDBModel, table = True):
     key_id: int = Field(nullable = False, index = True)
 
     public_key: str = Field(nullable = False, max_length = SIGNED_PREKEY_LENGTH)
-    private_key: str = Field(nullable = False, max_length = SIGNED_PREKEY_LENGTH)
-
     signature: str = Field(nullable = False, max_length = SIGNATURE_LENGTH)
 
     is_active: bool = Field(default = True, nullable = False)

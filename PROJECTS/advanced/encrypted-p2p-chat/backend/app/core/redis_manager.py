@@ -1,14 +1,17 @@
 """
-ⒸAngelaMos | 2025
-Redis manager for WebAuthn challenge storage with TTL
+©AngelaMos | 2026
+redis_manager.py
 """
 
+import json
 import logging
 
 import redis.asyncio as redis
+from webauthn.helpers import bytes_to_base64url, base64url_to_bytes
 
 from app.config import (
     settings,
+    SESSION_TTL_SECONDS,
     WEBAUTHN_CHALLENGE_TTL_SECONDS,
 )
 
@@ -16,9 +19,14 @@ from app.config import (
 logger = logging.getLogger(__name__)
 
 
+REG_CONTEXT_PREFIX = "webauthn:reg_ctx:"
+AUTH_CHALLENGE_PREFIX = "webauthn:auth_challenge:"
+SESSION_PREFIX = "session:"
+
+
 class RedisManager:
     """
-    Redis manager for challenge storage with automatic expiration
+    Redis manager for WebAuthn challenges and session tokens
     """
     def __init__(self) -> None:
         """
@@ -54,121 +62,129 @@ class RedisManager:
             await self.pool.aclose()
         logger.info("Disconnected from Redis")
 
-    async def set_registration_challenge(
+    def _require_client(self) -> redis.Redis:
+        """
+        Return the active client or raise if not connected
+        """
+        if not self.client:
+            raise RuntimeError("Redis client not connected")
+        return self.client
+
+    async def set_registration_context(
         self,
-        user_id: str,
+        username: str,
         challenge: bytes,
+        user_handle: bytes,
+        display_name: str,
         ttl: int = WEBAUTHN_CHALLENGE_TTL_SECONDS,
     ) -> None:
         """
-        Store registration challenge with TTL
+        Store registration challenge plus user handle and display name
         """
-        if not self.client:
-            raise RuntimeError("Redis client not connected")
-
-        key = f"webauthn:reg_challenge:{user_id}"
-        await self.client.setex(key, ttl, challenge.hex())
-        logger.debug(
-            "Stored registration challenge for user %s with %ss TTL",
-            user_id,
-            ttl
+        client = self._require_client()
+        key = f"{REG_CONTEXT_PREFIX}{username}"
+        payload = json.dumps(
+            {
+                "challenge": bytes_to_base64url(challenge),
+                "user_handle": bytes_to_base64url(user_handle),
+                "display_name": display_name,
+            }
         )
+        await client.setex(key, ttl, payload)
+        logger.debug("Stored registration context for %s", username)
 
-    async def get_registration_challenge(self, user_id: str) -> bytes | None:
+    async def take_registration_context(
+        self,
+        username: str,
+    ) -> dict[str, bytes | str] | None:
         """
-        Retrieve and delete registration challenge (one-time use)
+        Retrieve and delete the registration context atomically
         """
-        if not self.client:
-            raise RuntimeError("Redis client not connected")
+        client = self._require_client()
+        key = f"{REG_CONTEXT_PREFIX}{username}"
 
-        key = f"webauthn:reg_challenge:{user_id}"
-
-        async with self.client.pipeline() as pipe:
+        async with client.pipeline() as pipe:
             await pipe.get(key)
             await pipe.delete(key)
             results = await pipe.execute()
 
-        challenge_hex = results[0]
-        if challenge_hex is None:
+        raw = results[0]
+        if raw is None:
             return None
 
-        return bytes.fromhex(challenge_hex.decode())
+        data = json.loads(raw.decode())
+        return {
+            "challenge": base64url_to_bytes(data["challenge"]),
+            "user_handle": base64url_to_bytes(data["user_handle"]),
+            "display_name": data["display_name"],
+        }
 
     async def set_authentication_challenge(
         self,
-        user_id: str,
         challenge: bytes,
         ttl: int = WEBAUTHN_CHALLENGE_TTL_SECONDS,
     ) -> None:
         """
-        Store authentication challenge with TTL
+        Store an authentication challenge keyed by the challenge bytes
         """
-        if not self.client:
-            raise RuntimeError("Redis client not connected")
-
-        key = f"webauthn:auth_challenge:{user_id}"
-        await self.client.setex(key, ttl, challenge.hex())
+        client = self._require_client()
+        key = f"{AUTH_CHALLENGE_PREFIX}{bytes_to_base64url(challenge)}"
+        await client.set(key, b"1", ex = ttl, nx = True)
         logger.debug(
-            "Stored authentication challenge for user %s with %ss TTL",
-            user_id,
-            ttl
+            "Stored authentication challenge with %ss TTL",
+            ttl,
         )
 
-    async def get_authentication_challenge(self, user_id: str) -> bytes | None:
-        """
-        Retrieve and delete authentication challenge (one-time use)
-        """
-        if not self.client:
-            raise RuntimeError("Redis client not connected")
-
-        key = f"webauthn:auth_challenge:{user_id}"
-
-        async with self.client.pipeline() as pipe:
-            await pipe.get(key)
-            await pipe.delete(key)
-            results = await pipe.execute()
-
-        challenge_hex = results[0]
-        if challenge_hex is None:
-            return None
-
-        return bytes.fromhex(challenge_hex.decode())
-
-    async def set_value(
+    async def take_authentication_challenge(
         self,
-        key: str,
-        value: str,
-        ttl: int | None = None
+        challenge: bytes,
+    ) -> bool:
+        """
+        Atomically verify and consume an authentication challenge
+        """
+        client = self._require_client()
+        key = f"{AUTH_CHALLENGE_PREFIX}{bytes_to_base64url(challenge)}"
+        result = await client.delete(key)
+        return result == 1
+
+    async def create_session(
+        self,
+        token: str,
+        user_id: str,
+        ttl: int = SESSION_TTL_SECONDS,
     ) -> None:
         """
-        Generic set with optional TTL
+        Persist a session token bound to a user id with expiry
         """
-        if not self.client:
-            raise RuntimeError("Redis client not connected")
+        client = self._require_client()
+        key = f"{SESSION_PREFIX}{token}"
+        await client.setex(key, ttl, user_id)
+        logger.debug("Created session for user %s", user_id)
 
-        if ttl:
-            await self.client.setex(key, ttl, value)
-        else:
-            await self.client.set(key, value)
-
-    async def get_value(self, key: str) -> str | None:
+    async def get_session_user(
+        self,
+        token: str,
+    ) -> str | None:
         """
-        Generic get
+        Look up the user id for a session token if it is still valid
         """
-        if not self.client:
-            raise RuntimeError("Redis client not connected")
+        client = self._require_client()
+        key = f"{SESSION_PREFIX}{token}"
+        raw = await client.get(key)
+        if raw is None:
+            return None
+        return raw.decode()
 
-        value = await self.client.get(key)
-        return value.decode() if value else None
-
-    async def delete_value(self, key: str) -> None:
+    async def delete_session(
+        self,
+        token: str,
+    ) -> None:
         """
-        Generic delete
+        Invalidate a session token
         """
-        if not self.client:
-            raise RuntimeError("Redis client not connected")
-
-        await self.client.delete(key)
+        client = self._require_client()
+        key = f"{SESSION_PREFIX}{token}"
+        await client.delete(key)
 
 
 redis_manager = RedisManager()

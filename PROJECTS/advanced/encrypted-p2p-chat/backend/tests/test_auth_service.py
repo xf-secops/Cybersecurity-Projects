@@ -1,7 +1,9 @@
 """
-ⒸAngelaMos | 2025
-Tests for authentication service
+©AngelaMos | 2026
+test_auth_service.py
 """
+
+import secrets
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,7 +25,8 @@ class TestAuthService:
         user = await auth_service.create_user(
             session = db_session,
             username = "newuser",
-            display_name = "New User"
+            display_name = "New User",
+            webauthn_user_handle = secrets.token_bytes(64),
         )
 
         assert user.id is not None
@@ -31,12 +34,13 @@ class TestAuthService:
         assert user.display_name == "New User"
         assert user.is_active is True
         assert user.is_verified is False
+        assert len(user.webauthn_user_handle) == 64
 
     @pytest.mark.asyncio
     async def test_create_duplicate_user_fails(
         self,
         db_session: AsyncSession,
-        test_user: User
+        test_user: User,
     ):
         """
         Test cannot create user with duplicate username
@@ -45,21 +49,22 @@ class TestAuthService:
             await auth_service.create_user(
                 session = db_session,
                 username = test_user.username,
-                display_name = "Duplicate"
+                display_name = "Duplicate",
+                webauthn_user_handle = secrets.token_bytes(64),
             )
 
     @pytest.mark.asyncio
     async def test_get_user_by_username(
         self,
         db_session: AsyncSession,
-        test_user: User
+        test_user: User,
     ):
         """
         Test retrieving user by username
         """
         user = await auth_service.get_user_by_username(
             session = db_session,
-            username = test_user.username
+            username = test_user.username,
         )
 
         assert user is not None
@@ -73,7 +78,7 @@ class TestAuthService:
         """
         user = await auth_service.get_user_by_username(
             session = db_session,
-            username = "nonexistent"
+            username = "nonexistent",
         )
 
         assert user is None
@@ -82,14 +87,14 @@ class TestAuthService:
     async def test_get_user_by_id(
         self,
         db_session: AsyncSession,
-        test_user: User
+        test_user: User,
     ):
         """
         Test retrieving user by ID
         """
         user = await auth_service.get_user_by_id(
             session = db_session,
-            user_id = test_user.id
+            user_id = test_user.id,
         )
 
         assert user is not None

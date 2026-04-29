@@ -1,9 +1,10 @@
 """
-ⒸAngelaMos | 2025
-Authentication service for user and credential management
+©AngelaMos | 2026
+auth_service.py
 """
 
 import logging
+import secrets
 from typing import Any
 from uuid import UUID
 from datetime import UTC, datetime
@@ -28,15 +29,12 @@ from app.core.exceptions import (
 from app.core.passkey.passkey_manager import passkey_manager
 from app.core.redis_manager import redis_manager
 from app.models.Credential import Credential
-from app.models.IdentityKey import IdentityKey
 from app.models.User import User
-from app.services.prekey_service import prekey_service
 from app.schemas.auth import (
     AuthenticationBeginRequest,
     AuthenticationCompleteRequest,
     RegistrationBeginRequest,
     RegistrationCompleteRequest,
-    UserResponse,
     VerifiedRegistration,
 )
 
@@ -53,6 +51,7 @@ class AuthService:
         session: AsyncSession,
         username: str,
         display_name: str,
+        webauthn_user_handle: bytes,
     ) -> User:
         """
         Create a new user with username uniqueness check
@@ -68,6 +67,7 @@ class AuthService:
         user = User(
             username = username,
             display_name = display_name,
+            webauthn_user_handle = webauthn_user_handle,
         )
 
         session.add(user)
@@ -332,8 +332,7 @@ class AuthService:
         self,
         session: AsyncSession,
         request: RegistrationBeginRequest,
-    ) -> dict[str,
-              Any]:
+    ) -> dict[str, Any]:
         """
         Begin WebAuthn passkey registration flow
         """
@@ -349,25 +348,21 @@ class AuthService:
             )
             raise UserExistsError(f"Username {request.username} already exists")
 
-        user_id_bytes = request.username.encode()
-
-        exclude_credentials = []
-        if existing_user:
-            exclude_credentials = [
-                base64url_to_bytes(cred.credential_id)
-                for cred in existing_user.credentials
-            ]
+        from app.config import WEBAUTHN_USER_HANDLE_BYTES
+        user_handle = secrets.token_bytes(WEBAUTHN_USER_HANDLE_BYTES)
 
         options_response = passkey_manager.generate_registration_options(
-            user_id = user_id_bytes,
+            user_id = user_handle,
             username = request.username,
             display_name = request.display_name,
-            exclude_credentials = exclude_credentials,
+            exclude_credentials = [],
         )
 
-        await redis_manager.set_registration_challenge(
-            user_id = request.username,
+        await redis_manager.set_registration_context(
+            username = request.username,
             challenge = options_response.challenge,
+            user_handle = user_handle,
+            display_name = request.display_name,
         )
 
         logger.info("Started registration for user: %s", request.username)
@@ -378,17 +373,17 @@ class AuthService:
         session: AsyncSession,
         request: RegistrationCompleteRequest,
         username: str,
-    ) -> UserResponse:
+    ) -> User:
         """
         Complete WebAuthn passkey registration
         """
-        expected_challenge = await redis_manager.get_registration_challenge(
-            user_id = username
+        context = await redis_manager.take_registration_context(
+            username = username
         )
 
-        if not expected_challenge:
+        if context is None:
             logger.warning(
-                "Registration challenge not found or expired for user: %s",
+                "Registration context not found or expired for user: %s",
                 username
             )
             raise ChallengeExpiredError(
@@ -398,7 +393,7 @@ class AuthService:
         try:
             verified = passkey_manager.verify_registration(
                 credential = request.credential,
-                expected_challenge = expected_challenge,
+                expected_challenge = context["challenge"],
             )
         except Exception as e:
             logger.error("Registration verification failed: %s", e)
@@ -409,8 +404,8 @@ class AuthService:
         user = await self.create_user(
             session = session,
             username = username,
-            display_name = request.credential.get("displayName",
-                                                  username),
+            display_name = context["display_name"],
+            webauthn_user_handle = context["user_handle"],
         )
 
         await self.store_credential(
@@ -420,28 +415,14 @@ class AuthService:
             device_name = request.device_name,
         )
 
-        await prekey_service.initialize_user_keys(
-            session = session,
-            user_id = user.id,
-        )
-
         logger.info("Registration completed for user: %s", username)
-
-        return UserResponse(
-            id = str(user.id),
-            username = user.username,
-            display_name = user.display_name,
-            is_active = user.is_active,
-            is_verified = user.is_verified,
-            created_at = user.created_at.isoformat(),
-        )
+        return user
 
     async def begin_authentication(
         self,
         session: AsyncSession,
         request: AuthenticationBeginRequest,
-    ) -> dict[str,
-              Any]:
+    ) -> dict[str, Any]:
         """
         Begin WebAuthn passkey authentication flow
         """
@@ -453,49 +434,64 @@ class AuthService:
                 username = request.username,
             )
 
-            if not user:
-                logger.warning(
-                    "Authentication attempt for non-existent user: %s",
-                    request.username
-                )
-                raise UserNotFoundError("User not found")
-
-            if not user.is_active:
-                logger.warning(
-                    "Authentication attempt for inactive user: %s",
-                    request.username
-                )
-                raise UserInactiveError("User account is inactive")
-
-            allow_credentials = [
-                base64url_to_bytes(cred.credential_id)
-                for cred in user.credentials
-            ]
+            if user is not None and user.is_active:
+                allow_credentials = [
+                    base64url_to_bytes(cred.credential_id)
+                    for cred in user.credentials
+                ]
 
         options_response = passkey_manager.generate_authentication_options(
             allow_credentials = allow_credentials,
         )
 
-        user_id = request.username if request.username else "discoverable"
         await redis_manager.set_authentication_challenge(
-            user_id = user_id,
             challenge = options_response.challenge,
         )
 
-        logger.info("Started authentication for user: %s", user_id)
+        logger.info(
+            "Started authentication (username hint: %s)",
+            request.username or "<discoverable>"
+        )
         return options_response.options
 
     async def complete_authentication(
         self,
         session: AsyncSession,
         request: AuthenticationCompleteRequest,
-    ) -> UserResponse:
+    ) -> User:
         """
         Complete WebAuthn passkey authentication
         """
         credential_id = request.credential.get("id")
         if not credential_id:
             raise InvalidDataError("Missing credential ID")
+
+        client_data_b64 = request.credential.get("response", {}).get(
+            "clientDataJSON"
+        )
+        if not client_data_b64:
+            raise InvalidDataError("Missing clientDataJSON")
+
+        try:
+            import json as _json
+            client_data = _json.loads(
+                base64url_to_bytes(client_data_b64).decode()
+            )
+            challenge_bytes = base64url_to_bytes(client_data["challenge"])
+        except Exception as exc:
+            logger.error("Failed to parse clientDataJSON: %s", exc)
+            raise InvalidDataError("Malformed clientDataJSON") from exc
+
+        challenge_consumed = await redis_manager.take_authentication_challenge(
+            challenge = challenge_bytes
+        )
+        if not challenge_consumed:
+            logger.warning(
+                "Authentication challenge invalid or expired"
+            )
+            raise ChallengeExpiredError(
+                "Challenge expired or not found - please restart authentication"
+            )
 
         credential = await self.get_credential_by_id(
             session = session,
@@ -528,23 +524,10 @@ class AuthService:
             )
             raise UserInactiveError("User account is inactive")
 
-        expected_challenge = await redis_manager.get_authentication_challenge(
-            user_id = user.username
-        )
-
-        if not expected_challenge:
-            logger.warning(
-                "Authentication challenge not found for user: %s",
-                user.username
-            )
-            raise ChallengeExpiredError(
-                "Challenge expired or not found - please restart authentication"
-            )
-
         try:
             verified = passkey_manager.verify_authentication(
                 credential = request.credential,
-                expected_challenge = expected_challenge,
+                expected_challenge = challenge_bytes,
                 credential_public_key = base64url_to_bytes(credential.public_key),
                 credential_current_sign_count = credential.sign_count,
             )
@@ -572,30 +555,8 @@ class AuthService:
                 backup_eligible = verified.backup_eligible,
             )
 
-        ik_statement = select(IdentityKey).where(IdentityKey.user_id == user.id)
-        ik_result = await session.execute(ik_statement)
-        existing_ik = ik_result.scalar_one_or_none()
-
-        if not existing_ik:
-            logger.info(
-                "Initializing encryption keys for existing user: %s",
-                user.username
-            )
-            await prekey_service.initialize_user_keys(
-                session = session,
-                user_id = user.id,
-            )
-
         logger.info("Authentication successful for user: %s", user.username)
-
-        return UserResponse(
-            id = str(user.id),
-            username = user.username,
-            display_name = user.display_name,
-            is_active = user.is_active,
-            is_verified = user.is_verified,
-            created_at = user.created_at.isoformat(),
-        )
+        return user
 
 
 auth_service = AuthService()

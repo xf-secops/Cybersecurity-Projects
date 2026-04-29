@@ -1,10 +1,10 @@
 // ===================
-// ©AngelaMos | 2025
+// © AngelaMos | 2026
 // websocket-manager.ts
 // ===================
 import { atom, computed } from 'nanostores'
 import { WS_HEARTBEAT_INTERVAL, WS_RECONNECT_DELAY, WS_URL } from '../config'
-import { $userId } from '../stores'
+import { $isAuthenticated } from '../stores'
 import type {
   WSMessage,
   WSOutgoingEncryptedMessage,
@@ -60,8 +60,7 @@ class WebSocketManager {
   private fatalError = false
 
   connect(): void {
-    const userId = $userId.get()
-    if (!userId) {
+    if (!$isAuthenticated.get()) {
       $lastError.set('Cannot connect: User not authenticated')
       return
     }
@@ -78,7 +77,7 @@ class WebSocketManager {
     $connectionStatus.set('connecting')
     $lastError.set(null)
 
-    const wsUrl = `${WS_URL}/ws?user_id=${userId}`
+    const wsUrl = `${WS_URL}/ws`
     this.ws = new WebSocket(wsUrl)
 
     this.ws.onopen = this.handleOpen.bind(this)

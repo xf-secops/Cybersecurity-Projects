@@ -1,6 +1,6 @@
 """
-ⒸAngelaMos | 2025
-WebAuthn passkey manager using py_webauthn library
+©AngelaMos | 2026
+passkey_manager.py
 """
 
 import logging
@@ -81,7 +81,7 @@ class PasskeyManager:
             attestation = AttestationConveyancePreference.NONE,
             authenticator_selection = AuthenticatorSelectionCriteria(
                 resident_key = ResidentKeyRequirement.REQUIRED,
-                user_verification = UserVerificationRequirement.PREFERRED,
+                user_verification = UserVerificationRequirement.REQUIRED,
             ),
             exclude_credentials = exclude_creds,
         )
@@ -125,7 +125,9 @@ class PasskeyManager:
             attestation_format = verified_registration.fmt,
             credential_device_type = verified_registration.credential_device_type,
             credential_backed_up = verified_registration.credential_backed_up,
-            backup_eligible = verified_registration.credential_backed_up,
+            backup_eligible = (
+                verified_registration.credential_backup_eligible
+            ),
             backup_state = verified_registration.credential_backed_up,
         )
 
@@ -149,7 +151,7 @@ class PasskeyManager:
             rp_id = self.rp_id,
             challenge = challenge,
             allow_credentials = allow_creds,
-            user_verification = UserVerificationRequirement.PREFERRED,
+            user_verification = UserVerificationRequirement.REQUIRED,
         )
 
         logger.debug("Generated authentication options")

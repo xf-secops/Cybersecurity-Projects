@@ -50,7 +50,7 @@ export default function Chat(): JSX.Element {
         await cryptoService.initialize(currentUserId)
       } catch {}
       connectWebSocket()
-      await roomService.loadRooms(currentUserId)
+      await roomService.loadRooms()
     }
   })
 
@@ -127,7 +127,7 @@ export default function Chat(): JSX.Element {
       return
     }
 
-    const room = await roomService.createRoom(currentUserId, targetUserId)
+    const room = await roomService.createRoom(targetUserId)
 
     if (room) {
       setActiveRoom(room.id)

@@ -120,7 +120,8 @@ class CryptoService {
     )
     await saveSignedPreKey(this.userId, this.signedPreKey)
 
-    await api.encryption.rotateSignedPrekey(this.userId)
+    const unusedOTPs = await getUnusedOneTimePreKeys(this.userId)
+    await this.uploadPublicKeys(unusedOTPs)
   }
 
   private async replenishOneTimePreKeys(): Promise<void> {
@@ -130,6 +131,7 @@ class CryptoService {
       DEFAULT_ONE_TIME_PREKEY_COUNT / 2
     )
     await saveOneTimePreKeys(this.userId, newPreKeys)
+    await this.uploadPublicKeys(newPreKeys)
   }
 
   private async uploadPublicKeys(oneTimePreKeys: OneTimePreKey[]): Promise<void> {

@@ -1,12 +1,13 @@
 """
-ⒸAngelaMos | 2025
-Global exception handlers for FastAPI application
+©AngelaMos | 2026
+exception_handlers.py
 """
 
 import logging
 
 from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
+from slowapi.errors import RateLimitExceeded
 
 from app.core.exceptions import (
     AuthenticationError,
@@ -14,11 +15,7 @@ from app.core.exceptions import (
     CredentialNotFoundError,
     CredentialVerificationError,
     DatabaseError,
-    DecryptionError,
-    EncryptionError,
     InvalidDataError,
-    KeyExchangeError,
-    RatchetStateNotFoundError,
     UserExistsError,
     UserInactiveError,
     UserNotFoundError,
@@ -66,7 +63,7 @@ async def user_inactive_handler(
     logger.warning(
         "Inactive user access attempt on %s: %s",
         request.url,
-        exc.message
+        exc.message,
     )
     return JSONResponse(
         status_code = status.HTTP_403_FORBIDDEN,
@@ -98,7 +95,7 @@ async def credential_verification_handler(
     logger.error(
         "Credential verification failed on %s: %s",
         request.url,
-        exc.message
+        exc.message,
     )
     return JSONResponse(
         status_code = status.HTTP_401_UNAUTHORIZED,
@@ -162,59 +159,21 @@ async def invalid_data_handler(
     )
 
 
-async def encryption_error_handler(
+async def rate_limit_exceeded_handler(
     request: Request,
-    exc: EncryptionError
+    exc: RateLimitExceeded,
 ) -> JSONResponse:
     """
-    Handle EncryptionError exceptions
+    Handle slowapi RateLimitExceeded with a 429 response
     """
-    logger.error("Encryption error on %s: %s", request.url, exc.message)
-    return JSONResponse(
-        status_code = status.HTTP_500_INTERNAL_SERVER_ERROR,
-        content = {"detail": "Encryption failed"},
+    logger.warning(
+        "Rate limit exceeded on %s: %s",
+        request.url,
+        exc.detail,
     )
-
-
-async def decryption_error_handler(
-    request: Request,
-    exc: DecryptionError
-) -> JSONResponse:
-    """
-    Handle DecryptionError exceptions
-    """
-    logger.error("Decryption error on %s: %s", request.url, exc.message)
     return JSONResponse(
-        status_code = status.HTTP_500_INTERNAL_SERVER_ERROR,
-        content = {"detail": "Decryption failed"},
-    )
-
-
-async def ratchet_state_not_found_handler(
-    request: Request,
-    exc: RatchetStateNotFoundError
-) -> JSONResponse:
-    """
-    Handle RatchetStateNotFoundError exceptions
-    """
-    logger.warning("Ratchet state not found on %s: %s", request.url, exc.message)
-    return JSONResponse(
-        status_code = status.HTTP_404_NOT_FOUND,
-        content = {"detail": exc.message},
-    )
-
-
-async def key_exchange_error_handler(
-    request: Request,
-    exc: KeyExchangeError
-) -> JSONResponse:
-    """
-    Handle KeyExchangeError exceptions
-    """
-    logger.error("Key exchange error on %s: %s", request.url, exc.message)
-    return JSONResponse(
-        status_code = status.HTTP_500_INTERNAL_SERVER_ERROR,
-        content = {"detail": "Key exchange failed"},
+        status_code = status.HTTP_429_TOO_MANY_REQUESTS,
+        content = {"detail": f"Rate limit exceeded: {exc.detail}"},
     )
 
 
@@ -227,20 +186,13 @@ def register_exception_handlers(app: FastAPI) -> None:
     app.add_exception_handler(UserInactiveError, user_inactive_handler)
     app.add_exception_handler(
         CredentialNotFoundError,
-        credential_not_found_handler
+        credential_not_found_handler,
     )
     app.add_exception_handler(
         CredentialVerificationError,
-        credential_verification_handler
+        credential_verification_handler,
     )
     app.add_exception_handler(ChallengeExpiredError, challenge_expired_handler)
     app.add_exception_handler(DatabaseError, database_error_handler)
     app.add_exception_handler(AuthenticationError, authentication_error_handler)
     app.add_exception_handler(InvalidDataError, invalid_data_handler)
-    app.add_exception_handler(EncryptionError, encryption_error_handler)
-    app.add_exception_handler(DecryptionError, decryption_error_handler)
-    app.add_exception_handler(
-        RatchetStateNotFoundError,
-        ratchet_state_not_found_handler
-    )
-    app.add_exception_handler(KeyExchangeError, key_exchange_error_handler)
