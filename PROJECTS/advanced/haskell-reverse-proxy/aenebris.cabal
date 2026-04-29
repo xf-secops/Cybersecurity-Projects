@@ -41,6 +41,11 @@ library
                      , Aenebris.ML.Features
                      , Aenebris.ML.Model
                      , Aenebris.ML.Loader
+                     , Aenebris.ML.Inference
+                     , Aenebris.ML.Calibration
+                     , Aenebris.ML.IForest
+                     , Aenebris.ML.Engine
+                     , Aenebris.ML.Middleware
   default-language:    Haskell2010
   build-depends:       base >= 4.7 && < 5
                      , warp >= 3.3

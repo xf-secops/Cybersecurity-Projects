@@ -180,6 +180,49 @@ import Aenebris.ML.Features
   , uaSecChConsistency
   , userAgentLengthCap
   )
+import Aenebris.ML.Calibration
+  ( Calibrator(..)
+  , calibrate
+  , fitIsotonic
+  , fitPlatt
+  )
+import Aenebris.ML.Engine
+  ( Decision(..)
+  , DecisionDetails(..)
+  , Engine(..)
+  , EngineConfig(..)
+  , defaultEngineConfig
+  , makeEngine
+  , runEngine
+  , runEngineDecision
+  )
+import Aenebris.ML.Middleware
+  ( MLMiddlewareConfig(..)
+  , decisionResponseHeader
+  , decisionToWireText
+  , defaultMLMiddlewareConfig
+  , mlBotDetectionMiddleware
+  , scoreResponseHeader
+  )
+import Aenebris.ML.IForest
+  ( IForest(..)
+  , ITree(..)
+  , defaultIForestNumTrees
+  , defaultIForestSubsampleSize
+  , eulerMascheroni
+  , harmonicNumber
+  , normalizationConstant
+  , pathLength
+  , scoreIForest
+  )
+import Aenebris.ML.Inference
+  ( kZeroThreshold
+  , predictProba
+  , predictRaw
+  , predictScore
+  , sigmoidLink
+  , walkTree
+  )
 import Aenebris.ML.Loader
   ( ParseError(..)
   , parseEnsemble
@@ -217,6 +260,7 @@ import Aenebris.WAF.Rule
 
 import Control.Concurrent.STM
   ( atomically
+  , modifyTVar'
   , newTVarIO
   , readTVarIO
   )
@@ -271,7 +315,8 @@ import Network.Wai.Test
   , simpleStatus
   )
 import Test.Hspec
-  ( Spec
+  ( Expectation
+  , Spec
   , describe
   , expectationFailure
   , hspec
@@ -333,6 +378,11 @@ main = hspec $ do
   mlFeaturesSpec
   mlModelSpec
   mlLoaderSpec
+  mlInferenceSpec
+  mlCalibrationSpec
+  mlIForestSpec
+  mlEngineSpec
+  mlMiddlewareSpec
 
 configSpec :: Spec
 configSpec = describe "Config" $ do
@@ -2041,6 +2091,689 @@ mlLoaderSpec = describe "ML.Loader" $ do
       case parseEnsemble (mlLoaderSubst "version=v4" "version=v3") of
         Left err -> peKey err `shouldBe` "version"
         Right _  -> expectationFailure "expected Left"
+
+mkCatStump :: Bool -> MissingType -> [Word32] -> Double -> Double -> Tree
+mkCatStump defaultLeft mtype bitmap leftV rightV =
+  let bitmapVec  = VU.fromList bitmap
+      boundaries = VU.fromList [0, VU.length bitmapVec]
+      dt         = makeDecisionType SplitCategorical defaultLeft mtype
+  in Tree
+       { treeFeatureIdx    = VU.fromList [0, leafSentinel, leafSentinel]
+       , treeThreshold     = VU.fromList [0.0, 0.0, 0.0]
+       , treeLeftChild     = VU.fromList [1, noChildIndex, noChildIndex]
+       , treeRightChild    = VU.fromList [2, noChildIndex, noChildIndex]
+       , treeLeafValue     = VU.fromList [0.0, leftV, rightV]
+       , treeDecisionType  = VU.fromList [dt, 0, 0]
+       , treeCatBoundaries = boundaries
+       , treeCatThreshold  = bitmapVec
+       }
+
+mkSingleFeatureEnsemble :: Objective -> Double -> Bool -> [Tree] -> Ensemble
+mkSingleFeatureEnsemble obj sig avg trees = Ensemble
+  { ensembleVersion       = currentEnsembleVersion
+  , ensembleFeatureCount  = 1
+  , ensembleObjective     = obj
+  , ensembleBaseScore     = 0.0
+  , ensembleSigmoidScale  = sig
+  , ensembleAverageOutput = avg
+  , ensembleTrees         = V.fromList trees
+  }
+
+binaryEnsemble :: [Tree] -> Ensemble
+binaryEnsemble = mkSingleFeatureEnsemble ObjectiveBinaryLogistic defaultSigmoidScale False
+
+singletonFv :: Double -> VU.Vector Double
+singletonFv = VU.singleton
+
+mlInferenceSpec :: Spec
+mlInferenceSpec = describe "ML.Inference" $ do
+  tinyBytes <- runIO (BS.readFile "test/fixtures/ml/tiny_lgbm_v4.txt")
+
+  describe "walkTree on a leaf-only tree" $ do
+    it "returns the root index for a stump tree" $
+      walkTree (makeLeafTree 0.42) (singletonFv 0.0) `shouldBe` 0
+
+    it "predictRaw returns the leaf value for a single-leaf single-tree ensemble" $
+      predictRaw (binaryEnsemble [makeLeafTree 0.42]) (singletonFv 0.0)
+        `shouldBe` 0.42
+
+  describe "walkTree on a numerical stump (defaultLeft=True, MissingTypeNone)" $ do
+    let tree   = makeStumpTreeWithMissing 0 0.5 (-1.0) 1.0 True MissingTypeNone
+        ens    = binaryEnsemble [tree]
+
+    it "fval below threshold goes left (leaf value -1.0)" $
+      predictRaw ens (singletonFv 0.0) `shouldBe` (-1.0)
+
+    it "fval above threshold goes right (leaf value 1.0)" $
+      predictRaw ens (singletonFv 0.9) `shouldBe` 1.0
+
+    it "fval exactly at threshold goes left (predicate is <=, not <)" $
+      predictRaw ens (singletonFv 0.5) `shouldBe` (-1.0)
+
+    it "NaN with MissingTypeNone is remapped to 0 then compared (0 <= 0.5 -> left)" $
+      predictRaw ens (singletonFv (0.0 / 0.0)) `shouldBe` (-1.0)
+
+  describe "MissingType=Zero routes via default-left flag" $ do
+    let leftTree  = makeStumpTreeWithMissing 0 (-10.0) 7.0 (-7.0) True  MissingTypeZero
+        rightTree = makeStumpTreeWithMissing 0 (-10.0) 7.0 (-7.0) False MissingTypeZero
+
+    it "0.0 with defaultLeft=True hits left branch (ignoring threshold)" $
+      predictRaw (binaryEnsemble [leftTree]) (singletonFv 0.0) `shouldBe` 7.0
+
+    it "0.0 with defaultLeft=False hits right branch (ignoring threshold)" $
+      predictRaw (binaryEnsemble [rightTree]) (singletonFv 0.0) `shouldBe` (-7.0)
+
+    it "tiny non-zero (2e-36) is treated as zero by IsZero(kZeroThreshold=1e-35)" $
+      predictRaw (binaryEnsemble [leftTree]) (singletonFv 2.0e-36)
+        `shouldBe` 7.0
+
+    it "value just above kZeroThreshold is NOT treated as zero" $
+      predictRaw (binaryEnsemble [leftTree]) (singletonFv 1.0e-30)
+        `shouldBe` (-7.0)
+
+  describe "MissingType=NaN routes only when feature is NaN" $ do
+    let nanTree = makeStumpTreeWithMissing 0 0.5 (-1.0) 1.0 True MissingTypeNaN
+
+    it "NaN feature uses default-left (left leaf -1.0)" $
+      predictRaw (binaryEnsemble [nanTree]) (singletonFv (0.0 / 0.0))
+        `shouldBe` (-1.0)
+
+    it "non-NaN feature still uses normal threshold comparison" $
+      predictRaw (binaryEnsemble [nanTree]) (singletonFv 0.9)
+        `shouldBe` 1.0
+
+  describe "categorical bitmap routing" $ do
+    let bitmap5 = [5 :: Word32]
+
+    it "category 0 in bitmap 0b101 routes left" $
+      predictRaw (binaryEnsemble [mkCatStump False MissingTypeNone bitmap5 (-2.0) 2.0])
+                 (singletonFv 0.0)
+        `shouldBe` (-2.0)
+
+    it "category 1 NOT in bitmap 0b101 routes right" $
+      predictRaw (binaryEnsemble [mkCatStump False MissingTypeNone bitmap5 (-2.0) 2.0])
+                 (singletonFv 1.0)
+        `shouldBe` 2.0
+
+    it "category 2 in bitmap 0b101 routes left" $
+      predictRaw (binaryEnsemble [mkCatStump False MissingTypeNone bitmap5 (-2.0) 2.0])
+                 (singletonFv 2.0)
+        `shouldBe` (-2.0)
+
+    it "category beyond bitmap range routes right" $
+      predictRaw (binaryEnsemble [mkCatStump False MissingTypeNone bitmap5 (-2.0) 2.0])
+                 (singletonFv 99.0)
+        `shouldBe` 2.0
+
+    it "negative categorical feature routes right" $
+      predictRaw (binaryEnsemble [mkCatStump False MissingTypeNone bitmap5 (-2.0) 2.0])
+                 (singletonFv (-1.0))
+        `shouldBe` 2.0
+
+    it "categorical NaN with MissingTypeZero routes via default-left" $
+      predictRaw (binaryEnsemble [mkCatStump True MissingTypeZero bitmap5 (-2.0) 2.0])
+                 (singletonFv (0.0 / 0.0))
+        `shouldBe` (-2.0)
+
+  describe "multi-tree ensemble sums leaf contributions" $ do
+    let t1 = makeStumpTreeWithMissing 0 0.0 (-0.3) 0.3 False MissingTypeNone
+        t2 = makeStumpTreeWithMissing 0 0.5 (-0.2) 0.2 False MissingTypeNone
+
+    it "sums each tree's chosen leaf value" $
+      predictRaw (binaryEnsemble [t1, t2]) (singletonFv 0.7)
+        `shouldBe` 0.5
+
+    it "different feature value picks different leaves and changes the sum" $
+      predictRaw (binaryEnsemble [t1, t2]) (singletonFv (-0.1))
+        `shouldBe` (-0.5)
+
+  describe "predictScore: average_output divisor" $ do
+    let t1 = makeLeafTree 1.0
+        t2 = makeLeafTree 3.0
+
+    it "no average_output: predictScore equals predictRaw" $ do
+      let ens = mkSingleFeatureEnsemble ObjectiveBinaryLogistic defaultSigmoidScale False [t1, t2]
+      predictScore ens (singletonFv 0.0) `shouldBe` 4.0
+
+    it "average_output=True divides raw by num_trees" $ do
+      let ens = mkSingleFeatureEnsemble ObjectiveBinaryLogistic defaultSigmoidScale True [t1, t2]
+      predictScore ens (singletonFv 0.0) `shouldBe` 2.0
+
+    it "average_output=True with empty tree vector falls back to raw (n=0 guard)" $ do
+      let ens = mkSingleFeatureEnsemble ObjectiveBinaryLogistic defaultSigmoidScale True []
+      predictScore ens (singletonFv 0.0) `shouldBe` 0.0
+
+  describe "sigmoidLink" $ do
+    it "scale*x = 0 yields 0.5" $
+      sigmoidLink 1.0 0.0 `shouldBe` 0.5
+
+    it "very large positive x saturates near 1.0" $
+      sigmoidLink 1.0 1000.0 `shouldBe` 1.0
+
+    it "very large negative x saturates near 0.0" $
+      sigmoidLink 1.0 (-1000.0) `shouldBe` 0.0
+
+    it "scale=0.5 halves the steepness" $
+      sigmoidLink 0.5 2.0 `shouldBe` (1.0 / (1.0 + exp (-1.0)))
+
+  describe "predictProba: objective-specific link function" $ do
+    it "binary logistic applies sigmoid with the ensemble's scale" $ do
+      let ens = mkSingleFeatureEnsemble ObjectiveBinaryLogistic 1.0 False [makeLeafTree 0.0]
+      predictProba ens (singletonFv 0.0) `shouldBe` 0.5
+
+    it "binary logistic with sigmoidScale=0.5 applies the scale" $ do
+      let ens = mkSingleFeatureEnsemble ObjectiveBinaryLogistic 0.5 False [makeLeafTree 2.0]
+      predictProba ens (singletonFv 0.0) `shouldBe` (1.0 / (1.0 + exp (-1.0)))
+
+    it "regression returns the score directly (no sigmoid)" $ do
+      let ens = mkSingleFeatureEnsemble ObjectiveRegression 1.0 False [makeLeafTree 7.5]
+      predictProba ens (singletonFv 0.0) `shouldBe` 7.5
+
+  describe "kZeroThreshold matches LightGBM" $
+    it "is exactly 1e-35" $
+      kZeroThreshold `shouldBe` 1.0e-35
+
+  describe "end-to-end against the tiny LightGBM v4 fixture" $ do
+    case parseEnsemble tinyBytes of
+      Left err -> it "parses tinyBytes" $ expectationFailure (show err)
+      Right ens -> do
+        it "feature vector [0, 0] (cat_feat=0 -> left, num_feat=0 -> left) hits leaf 0 (0.3)" $
+          predictRaw ens (VU.fromList [0.0, 0.0]) `shouldBe` 0.3
+
+        it "feature vector [10, 1] (cat_feat=1 -> left, num_feat=10 -> right) hits leaf 1 (-0.2)" $
+          predictRaw ens (VU.fromList [10.0, 1.0]) `shouldBe` (-0.2)
+
+        it "feature vector [0, 2] (cat_feat=2 -> right) hits leaf 2 (-0.4)" $
+          predictRaw ens (VU.fromList [0.0, 2.0]) `shouldBe` (-0.4)
+
+        it "predictProba on tinyBytes feeds the sum through binary sigmoid scale=1" $
+          predictProba ens (VU.fromList [0.0, 0.0])
+            `shouldBe` (1.0 / (1.0 + exp (-0.3)))
+
+isPlatt :: Calibrator -> Bool
+isPlatt (PlattCalibrator _ _) = True
+isPlatt _                      = False
+
+isIsotonic :: Calibrator -> Bool
+isIsotonic (IsotonicCalibrator _) = True
+isIsotonic _                       = False
+
+mlCalibrationSpec :: Spec
+mlCalibrationSpec = describe "ML.Calibration" $ do
+  describe "NoCalibrator" $
+    it "is identity for any input" $ do
+      calibrate NoCalibrator 0.0 `shouldBe` 0.0
+      calibrate NoCalibrator 0.5 `shouldBe` 0.5
+      calibrate NoCalibrator 1.0 `shouldBe` 1.0
+      calibrate NoCalibrator (-3.7) `shouldBe` (-3.7)
+
+  describe "PlattCalibrator basic shape" $ do
+    it "(a=0, b=0) yields constant 0.5 regardless of p" $ do
+      calibrate (PlattCalibrator 0.0 0.0) 0.3    `shouldBe` 0.5
+      calibrate (PlattCalibrator 0.0 0.0) 1000.0 `shouldBe` 0.5
+
+    it "negative a produces output increasing in p" $ do
+      let cal = PlattCalibrator (-2.0) 1.0
+      calibrate cal 0.0 `shouldSatisfy` (< calibrate cal 1.0)
+
+    it "positive (a*p + b) saturates near 0 for large p" $
+      calibrate (PlattCalibrator 1.0 0.0) 1000.0 `shouldBe` 0.0
+
+    it "negative (a*p + b) saturates near 1 for large p" $
+      calibrate (PlattCalibrator (-1.0) 0.0) 1000.0 `shouldBe` 1.0
+
+  describe "fitPlatt edge cases" $ do
+    it "returns NoCalibrator for empty input" $
+      fitPlatt VU.empty `shouldBe` NoCalibrator
+
+    it "returns NoCalibrator for single sample" $
+      fitPlatt (VU.singleton (0.5, True)) `shouldBe` NoCalibrator
+
+    it "returns PlattCalibrator for >=2 samples" $
+      fitPlatt (VU.fromList [(0.1, False), (0.9, True)])
+        `shouldSatisfy` isPlatt
+
+  describe "fitPlatt convergence on logistic-like data" $ do
+    let negativeExamples = [(fromIntegral i / 100.0, False) | i <- [0  :: Int .. 49]]
+        positiveExamples = [(fromIntegral i / 100.0, True)  | i <- [50 :: Int .. 99]]
+        samples          = VU.fromList (negativeExamples ++ positiveExamples)
+        cal              = fitPlatt samples
+
+    it "fit recovers a < 0 (output increases with p)" $
+      case cal of
+        PlattCalibrator a _ -> a `shouldSatisfy` (< 0.0)
+        _                    -> expectationFailure "expected PlattCalibrator"
+
+    it "calibrated output at low p is less than at high p" $
+      calibrate cal 0.1 `shouldSatisfy` (< calibrate cal 0.9)
+
+    it "calibrated output stays in (0, 1)" $ do
+      let mid = calibrate cal 0.5
+      mid `shouldSatisfy` (> 0.0)
+      mid `shouldSatisfy` (< 1.0)
+
+  describe "fitIsotonic edge cases" $ do
+    it "returns NoCalibrator for empty input" $
+      fitIsotonic VU.empty `shouldBe` NoCalibrator
+
+    it "returns NoCalibrator for single sample" $
+      fitIsotonic (VU.singleton (0.5, True)) `shouldBe` NoCalibrator
+
+    it "returns IsotonicCalibrator for >=2 samples" $
+      fitIsotonic (VU.fromList [(0.1, False), (0.9, True)])
+        `shouldSatisfy` isIsotonic
+
+  describe "fitIsotonic on already-monotone data" $ do
+    let samples = VU.fromList
+          [(0.1, False), (0.3, False), (0.6, True), (0.9, True)]
+        cal = fitIsotonic samples
+
+    it "low raw clamps to 0.0" $
+      calibrate cal 0.0 `shouldBe` 0.0
+
+    it "high raw clamps to 1.0" $
+      calibrate cal 1.0 `shouldBe` 1.0
+
+    it "calibrated values are monotone non-decreasing" $
+      case cal of
+        IsotonicCalibrator bp ->
+          let cals = VU.toList (VU.map snd bp)
+          in all (uncurry (<=)) (zip cals (drop 1 cals)) `shouldBe` True
+        _ -> expectationFailure "expected IsotonicCalibrator"
+
+  describe "fitIsotonic corrects non-monotone data" $ do
+    let samples = VU.fromList
+          [(0.1, False), (0.4, True), (0.5, False), (0.9, True)]
+        cal = fitIsotonic samples
+
+    it "produces 3 breakpoints (one PAV merge)" $
+      case cal of
+        IsotonicCalibrator bp -> VU.length bp `shouldBe` 3
+        _ -> expectationFailure "expected IsotonicCalibrator"
+
+    it "calibrated values are monotone non-decreasing" $
+      case cal of
+        IsotonicCalibrator bp ->
+          let cals = VU.toList (VU.map snd bp)
+          in all (uncurry (<=)) (zip cals (drop 1 cals)) `shouldBe` True
+        _ -> expectationFailure "expected IsotonicCalibrator"
+
+  describe "fitIsotonic ties" $ do
+    let samples = VU.fromList [(0.5, True), (0.5, False)]
+        cal = fitIsotonic samples
+
+    it "merges identical raw values into one breakpoint" $
+      case cal of
+        IsotonicCalibrator bp -> VU.length bp `shouldBe` 1
+        _ -> expectationFailure "expected IsotonicCalibrator"
+
+    it "merged breakpoint has averaged label" $
+      calibrate cal 0.5 `shouldBe` 0.5
+
+  describe "fitIsotonic with all-same labels" $ do
+    it "all True calibrates to 1.0 across the range" $ do
+      let cal = fitIsotonic (VU.fromList [(0.1, True), (0.5, True), (0.9, True)])
+      calibrate cal 0.5 `shouldBe` 1.0
+
+    it "all False calibrates to 0.0 across the range" $ do
+      let cal = fitIsotonic (VU.fromList [(0.1, False), (0.5, False), (0.9, False)])
+      calibrate cal 0.5 `shouldBe` 0.0
+
+  describe "isotonic lookup behavior" $ do
+    let cal = IsotonicCalibrator
+                (VU.fromList [(0.25, 0.0), (0.5, 0.5), (0.75, 1.0)])
+
+    it "clamps below first breakpoint" $
+      calibrate cal 0.0 `shouldBe` 0.0
+
+    it "clamps above last breakpoint" $
+      calibrate cal 1.5 `shouldBe` 1.0
+
+    it "returns exact value at a breakpoint" $
+      calibrate cal 0.5 `shouldBe` 0.5
+
+    it "linearly interpolates between breakpoints" $ do
+      let bp = VU.fromList [(0.0, 0.25), (1.0, 0.75)]
+      calibrate (IsotonicCalibrator bp) 0.5 `shouldBe` 0.5
+
+    it "empty breakpoints pass through" $
+      calibrate (IsotonicCalibrator VU.empty) 0.42 `shouldBe` 0.42
+
+shouldBeApprox :: Double -> Double -> Expectation
+shouldBeApprox actual expected =
+  abs (actual - expected) `shouldSatisfy` (< 1.0e-9)
+
+singleSplitTree :: Int -> Double -> Int -> Int -> ITree
+singleSplitTree featIdx thr leftSize rightSize =
+  ITreeSplit featIdx thr (ITreeLeaf leftSize) (ITreeLeaf rightSize)
+
+mlIForestSpec :: Spec
+mlIForestSpec = describe "ML.IForest" $ do
+  describe "harmonicNumber" $ do
+    it "H(0) is 0" $
+      harmonicNumber 0 `shouldBe` 0.0
+
+    it "H(1) is exactly 1.0" $
+      harmonicNumber 1 `shouldBe` 1.0
+
+    it "H(2) is exactly 1.5" $
+      harmonicNumber 2 `shouldBe` 1.5
+
+    it "H(3) is 1 + 1/2 + 1/3" $
+      harmonicNumber 3 `shouldBeApprox` (1.0 + 0.5 + 1.0 / 3.0)
+
+    it "H(1000) matches the asymptotic ln(n)+gamma+1/(2n) within 1e-6" $ do
+      let expected = log 1000.0 + eulerMascheroni + 1.0 / (2.0 * 1000.0)
+      abs (harmonicNumber 1000 - expected) `shouldSatisfy` (< 1.0e-6)
+
+    it "rejects negative input by returning 0" $
+      harmonicNumber (-5) `shouldBe` 0.0
+
+  describe "normalizationConstant c(n)" $ do
+    it "c(0) is 0 (degenerate)" $
+      normalizationConstant 0 `shouldBe` 0.0
+
+    it "c(1) is 0 (degenerate)" $
+      normalizationConstant 1 `shouldBe` 0.0
+
+    it "c(2) is 2*H(1) - 2*1/2 = 1.0" $
+      normalizationConstant 2 `shouldBe` 1.0
+
+    it "c(256) matches Liu et al. 2008 reference value" $
+      normalizationConstant 256
+        `shouldBeApprox`
+          (2.0 * harmonicNumber 255 - 2.0 * 255.0 / 256.0)
+
+  describe "pathLength on a single split" $ do
+    let tree = singleSplitTree 0 0.5 1 1
+        fvLeft  = VU.singleton 0.3
+        fvRight = VU.singleton 0.7
+
+    it "feature value <= threshold goes left, depth increments to 1" $
+      pathLength tree fvLeft 0
+        `shouldBe` (1.0 + normalizationConstant 1)
+
+    it "feature value > threshold goes right, depth increments to 1" $
+      pathLength tree fvRight 0
+        `shouldBe` (1.0 + normalizationConstant 1)
+
+    it "leaf adds c(leafSize) to currentDepth" $ do
+      let leaf10 = ITreeLeaf 10
+      pathLength leaf10 (VU.singleton 0.0) 5
+        `shouldBe` (5.0 + normalizationConstant 10)
+
+  describe "pathLength on a deeper tree" $ do
+    let tree = ITreeSplit 0 0.5
+                 (ITreeSplit 1 0.5
+                   (ITreeLeaf 1) (ITreeLeaf 1))
+                 (ITreeLeaf 2)
+        fv00 = VU.fromList [0.3, 0.3]
+        fv01 = VU.fromList [0.3, 0.7]
+        fv1  = VU.fromList [0.7, 0.0]
+
+    it "fv00 traverses two splits and lands on left-left leaf" $
+      pathLength tree fv00 0
+        `shouldBe` (2.0 + normalizationConstant 1)
+
+    it "fv01 traverses two splits and lands on left-right leaf" $
+      pathLength tree fv01 0
+        `shouldBe` (2.0 + normalizationConstant 1)
+
+    it "fv1 traverses one split and lands on right leaf with size 2" $
+      pathLength tree fv1 0
+        `shouldBe` (1.0 + normalizationConstant 2)
+
+  describe "scoreIForest edge cases" $ do
+    it "empty forest returns 0.0" $
+      scoreIForest (IForest V.empty 256) (VU.singleton 0.0) `shouldBe` 0.0
+
+    it "subsample size 0 returns 0.0" $
+      scoreIForest (IForest (V.singleton (ITreeLeaf 1)) 0) (VU.singleton 0.0)
+        `shouldBe` 0.0
+
+    it "subsample size 1 returns 0.0 (c(1) is 0)" $
+      scoreIForest (IForest (V.singleton (ITreeLeaf 1)) 1) (VU.singleton 0.0)
+        `shouldBe` 0.0
+
+  describe "scoreIForest produces values in (0, 1]" $ do
+    let forest = IForest
+          (V.fromList
+            [ singleSplitTree 0 0.5 1 1
+            , singleSplitTree 0 0.7 1 1
+            , singleSplitTree 0 0.3 1 1
+            ])
+          4
+
+    it "anomalous input produces a score" $ do
+      let s = scoreIForest forest (VU.singleton 0.0)
+      s `shouldSatisfy` (> 0.0)
+      s `shouldSatisfy` (<= 1.0)
+
+  describe "scoreIForest: shorter average path = higher anomaly score" $ do
+    let shallow = IForest
+          (V.singleton (ITreeSplit 0 0.5 (ITreeLeaf 1) (ITreeLeaf 1)))
+          16
+        deep    = IForest
+          (V.singleton
+            (ITreeSplit 0 0.5
+              (ITreeSplit 1 0.5
+                (ITreeSplit 2 0.5 (ITreeLeaf 1) (ITreeLeaf 1))
+                (ITreeLeaf 1))
+              (ITreeLeaf 1)))
+          16
+        fv = VU.fromList [0.3, 0.3, 0.3]
+
+    it "shallow tree (depth 1) yields higher score than deep tree (depth 3)" $
+      scoreIForest shallow fv `shouldSatisfy` (> scoreIForest deep fv)
+
+  describe "default constants from Liu et al. 2008" $ do
+    it "default tree count is 100" $
+      defaultIForestNumTrees `shouldBe` 100
+
+    it "default subsample size is 256" $
+      defaultIForestSubsampleSize `shouldBe` 256
+
+    it "Euler-Mascheroni constant matches the standard 16-digit value" $
+      eulerMascheroni `shouldBe` 0.5772156649015329
+
+mlEngineSpec :: Spec
+mlEngineSpec = describe "ML.Engine" $ do
+  let humanLeafEnsemble = binaryEnsemble [makeLeafTree (-5.0)]
+      botLeafEnsemble   = binaryEnsemble [makeLeafTree   5.0]
+      midLeafEnsemble   = binaryEnsemble [makeLeafTree   0.0]
+
+      cfg               = defaultEngineConfig
+      eng e cal mIf     = makeEngine e cal mIf cfg
+
+      lowAnomalyForest  = IForest (V.singleton (ITreeLeaf 256)) 256
+      highAnomalyForest = IForest (V.singleton (ITreeLeaf 1))   256
+
+  describe "defaultEngineConfig" $ do
+    it "uses sensible defaults" $ do
+      ecHumanThreshold       cfg `shouldBe` 0.3
+      ecBotThreshold         cfg `shouldBe` 0.7
+      ecIForestEscalation    cfg `shouldBe` 0.6
+      ecChallengeOnAmbiguous cfg `shouldBe` True
+
+  describe "decision boundaries with NoCalibrator and no IForest" $ do
+    it "very negative leaf (proba ~ 0.0067) routes to DecisionHuman" $
+      runEngineDecision (eng humanLeafEnsemble NoCalibrator Nothing) (singletonFv 0.0)
+        `shouldBe` DecisionHuman
+
+    it "very positive leaf (proba ~ 0.993) routes to DecisionBot" $
+      runEngineDecision (eng botLeafEnsemble NoCalibrator Nothing) (singletonFv 0.0)
+        `shouldBe` DecisionBot
+
+    it "midpoint leaf (proba = 0.5) lands in ambiguous band -> DecisionChallenge" $
+      runEngineDecision (eng midLeafEnsemble NoCalibrator Nothing) (singletonFv 0.0)
+        `shouldBe` DecisionChallenge
+
+  describe "ambiguous band escalation via IForest" $ do
+    it "low-anomaly IForest (score 0.5 < 0.6 escalation) keeps DecisionChallenge" $
+      runEngineDecision
+        (eng midLeafEnsemble NoCalibrator (Just lowAnomalyForest))
+        (singletonFv 0.0)
+        `shouldBe` DecisionChallenge
+
+    it "high-anomaly IForest (score 1.0 >= 0.6 escalation) escalates to DecisionBot" $
+      runEngineDecision
+        (eng midLeafEnsemble NoCalibrator (Just highAnomalyForest))
+        (singletonFv 0.0)
+        `shouldBe` DecisionBot
+
+    it "DecisionDetails records the IF score when present" $
+      ddIForestScore
+        (runEngine (eng midLeafEnsemble NoCalibrator (Just highAnomalyForest))
+                   (singletonFv 0.0))
+        `shouldBe` Just 1.0
+
+    it "DecisionDetails records Nothing for IF score when absent" $
+      ddIForestScore
+        (runEngine (eng midLeafEnsemble NoCalibrator Nothing) (singletonFv 0.0))
+        `shouldBe` Nothing
+
+  describe "ambiguous band with challenges disabled" $ do
+    let noChallengeCfg = cfg { ecChallengeOnAmbiguous = False }
+        engNoChal e cal mIf = makeEngine e cal mIf noChallengeCfg
+
+    it "ambiguous calibrated + no IForest falls through to DecisionHuman" $
+      runEngineDecision
+        (engNoChal midLeafEnsemble NoCalibrator Nothing)
+        (singletonFv 0.0)
+        `shouldBe` DecisionHuman
+
+    it "ambiguous calibrated + low-anomaly IForest still falls through to DecisionHuman" $
+      runEngineDecision
+        (engNoChal midLeafEnsemble NoCalibrator (Just lowAnomalyForest))
+        (singletonFv 0.0)
+        `shouldBe` DecisionHuman
+
+    it "ambiguous calibrated + high-anomaly IForest escalates to DecisionBot" $
+      runEngineDecision
+        (engNoChal midLeafEnsemble NoCalibrator (Just highAnomalyForest))
+        (singletonFv 0.0)
+        `shouldBe` DecisionBot
+
+  describe "calibrator changes the decision threshold" $ do
+    let almostBotEnsemble = binaryEnsemble [makeLeafTree 1.5]
+        rawProba          = 1.0 / (1.0 + exp (-1.5))
+
+    it "without calibration, raw proba in (0.7, 0.99) -> DecisionBot" $ do
+      let result = runEngine (eng almostBotEnsemble NoCalibrator Nothing) (singletonFv 0.0)
+      ddRawProba   result `shouldBe` rawProba
+      ddCalibrated result `shouldBe` rawProba
+      ddDecision   result `shouldBe` DecisionBot
+
+    it "Platt with strongly negative a*p+b pulls calibrated below human threshold" $ do
+      let cal    = PlattCalibrator (-100.0) 100.0
+          result = runEngine (eng almostBotEnsemble cal Nothing) (singletonFv 0.0)
+      ddCalibrated result `shouldSatisfy` (< 0.3)
+      ddDecision   result `shouldBe` DecisionHuman
+
+  describe "DecisionDetails mirrors all four fields" $ do
+    let result = runEngine (eng midLeafEnsemble NoCalibrator Nothing) (singletonFv 0.0)
+    it "ddDecision reflects the routing" $
+      ddDecision result `shouldBe` DecisionChallenge
+    it "ddRawProba is predictProba output (0.5 for leaf=0)" $
+      ddRawProba result `shouldBe` 0.5
+    it "ddCalibrated equals ddRawProba under NoCalibrator" $
+      ddCalibrated result `shouldBe` 0.5
+    it "ddIForestScore is Nothing when no IForest configured" $
+      ddIForestScore result `shouldBe` Nothing
+
+mlEngineWithLeaf :: Double -> Engine
+mlEngineWithLeaf leafValue =
+  let ens = Ensemble
+        { ensembleVersion       = currentEnsembleVersion
+        , ensembleFeatureCount  = featureVectorLength
+        , ensembleObjective     = ObjectiveBinaryLogistic
+        , ensembleBaseScore     = 0.0
+        , ensembleSigmoidScale  = defaultSigmoidScale
+        , ensembleAverageOutput = False
+        , ensembleTrees         = V.singleton (makeLeafTree leafValue)
+        }
+  in makeEngine ens NoCalibrator Nothing defaultEngineConfig
+
+mlMiddlewareSpec :: Spec
+mlMiddlewareSpec = describe "ML.Middleware" $ do
+  let humanEng     = mlEngineWithLeaf (-5.0)
+      botEng       = mlEngineWithLeaf   5.0
+      challengeEng = mlEngineWithLeaf   0.0
+      ctx          = emptyFeatureContext
+      humanCfg     = defaultMLMiddlewareConfig humanEng     ctx
+      botCfg       = defaultMLMiddlewareConfig botEng       ctx
+      challengeCfg = defaultMLMiddlewareConfig challengeEng ctx
+      buildApp cfg = mlBotDetectionMiddleware cfg okApp
+
+  describe "DecisionHuman → pass through with ML signal headers" $ do
+    it "returns 200 from inner application" $ do
+      resp <- runSession (request Network.Wai.Test.defaultRequest) (buildApp humanCfg)
+      simpleStatus resp `shouldBe` status200
+
+    it "attaches X-Aenebris-ML-Decision: human" $ do
+      resp <- runSession (request Network.Wai.Test.defaultRequest) (buildApp humanCfg)
+      lookup decisionResponseHeader (simpleHeaders resp)
+        `shouldBe` Just (decisionToWireText DecisionHuman)
+
+    it "attaches X-Aenebris-ML-Score header" $ do
+      resp <- runSession (request Network.Wai.Test.defaultRequest) (buildApp humanCfg)
+      lookup scoreResponseHeader (simpleHeaders resp) `shouldSatisfy` isJust
+
+    it "omits ML signal headers when mmcAttachHeaders=False" $ do
+      let cfg  = humanCfg { mmcAttachHeaders = False }
+          app  = buildApp cfg
+      resp <- runSession (request Network.Wai.Test.defaultRequest) app
+      lookup decisionResponseHeader (simpleHeaders resp) `shouldBe` Nothing
+      lookup scoreResponseHeader    (simpleHeaders resp) `shouldBe` Nothing
+
+  describe "DecisionBot → 403 block" $ do
+    it "returns 403" $ do
+      resp <- runSession (request Network.Wai.Test.defaultRequest) (buildApp botCfg)
+      simpleStatus resp `shouldBe` status403
+
+    it "attaches X-Aenebris-ML-Decision: bot" $ do
+      resp <- runSession (request Network.Wai.Test.defaultRequest) (buildApp botCfg)
+      lookup decisionResponseHeader (simpleHeaders resp)
+        `shouldBe` Just (decisionToWireText DecisionBot)
+
+    it "responds with text/plain content type" $ do
+      resp <- runSession (request Network.Wai.Test.defaultRequest) (buildApp botCfg)
+      lookup "Content-Type" (simpleHeaders resp)
+        `shouldSatisfy` maybe False (BS.isPrefixOf "text/plain")
+
+  describe "DecisionChallenge → 403 challenge page" $ do
+    it "returns 403" $ do
+      resp <- runSession (request Network.Wai.Test.defaultRequest) (buildApp challengeCfg)
+      simpleStatus resp `shouldBe` status403
+
+    it "attaches X-Aenebris-ML-Decision: challenge" $ do
+      resp <- runSession (request Network.Wai.Test.defaultRequest) (buildApp challengeCfg)
+      lookup decisionResponseHeader (simpleHeaders resp)
+        `shouldBe` Just (decisionToWireText DecisionChallenge)
+
+    it "responds with text/html content type" $ do
+      resp <- runSession (request Network.Wai.Test.defaultRequest) (buildApp challengeCfg)
+      lookup "Content-Type" (simpleHeaders resp)
+        `shouldSatisfy` maybe False (BS.isPrefixOf "text/html")
+
+  describe "custom response builders override defaults" $
+    it "custom mmcBotResponse is used instead of the default 403" $ do
+      let customBotResp _req _details =
+            responseLBS status429
+              [("Content-Type", "text/plain")]
+              "custom bot response"
+          cfg = botCfg { mmcBotResponse = customBotResp }
+      resp <- runSession (request Network.Wai.Test.defaultRequest) (buildApp cfg)
+      simpleStatus resp `shouldBe` status429
+
+  describe "logging callback fires" $
+    it "mmcLogDetails callback is invoked once per request" $ do
+      counter <- newTVarIO (0 :: Int)
+      let logCallback _req _details =
+            atomically (modifyTVar' counter (+ 1))
+          cfg = humanCfg { mmcLogDetails = Just logCallback }
+      _ <- runSession (request Network.Wai.Test.defaultRequest) (buildApp cfg)
+      readTVarIO counter `shouldReturn` 1
 
 headersOnlyRequest :: [(BS.ByteString, BS.ByteString)] -> Request
 headersOnlyRequest hs =

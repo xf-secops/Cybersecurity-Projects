@@ -83,7 +83,7 @@ header "Building from source"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SRC_DIR="$SCRIPT_DIR"
 
-if [[ ! -f "$SRC_DIR/credential-enumeration.nimble" ]]; then
+if [[ ! -f "$SRC_DIR/credenum.nimble" ]]; then
     fail "Run install.sh from the project root directory."
 fi
 

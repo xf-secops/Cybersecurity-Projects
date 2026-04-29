@@ -1,5 +1,5 @@
 # ©AngelaMos | 2026
-# credential-enumeration.nimble
+# credenum.nimble
 
 version       = "0.1.0"
 author        = "AngelaMos"

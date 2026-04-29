@@ -6,7 +6,7 @@ FROM nimlang/nim:2.2.0-alpine AS builder
 WORKDIR /build
 COPY src/ src/
 COPY config.nims .
-COPY credential-enumeration.nimble .
+COPY credenum.nimble .
 
 RUN nim c -d:release --opt:size --passL:-static -o:/build/credenum src/harvester.nim && \
     strip -s /build/credenum
