@@ -196,6 +196,14 @@ import Aenebris.ML.Engine
   , runEngine
   , runEngineDecision
   )
+import Aenebris.ML.Middleware
+  ( MLMiddlewareConfig(..)
+  , decisionResponseHeader
+  , decisionToWireText
+  , defaultMLMiddlewareConfig
+  , mlBotDetectionMiddleware
+  , scoreResponseHeader
+  )
 import Aenebris.ML.IForest
   ( IForest(..)
   , ITree(..)
@@ -252,6 +260,7 @@ import Aenebris.WAF.Rule
 
 import Control.Concurrent.STM
   ( atomically
+  , modifyTVar'
   , newTVarIO
   , readTVarIO
   )
@@ -373,6 +382,7 @@ main = hspec $ do
   mlCalibrationSpec
   mlIForestSpec
   mlEngineSpec
+  mlMiddlewareSpec
 
 configSpec :: Spec
 configSpec = describe "Config" $ do
@@ -2670,6 +2680,100 @@ mlEngineSpec = describe "ML.Engine" $ do
       ddCalibrated result `shouldBe` 0.5
     it "ddIForestScore is Nothing when no IForest configured" $
       ddIForestScore result `shouldBe` Nothing
+
+mlEngineWithLeaf :: Double -> Engine
+mlEngineWithLeaf leafValue =
+  let ens = Ensemble
+        { ensembleVersion       = currentEnsembleVersion
+        , ensembleFeatureCount  = featureVectorLength
+        , ensembleObjective     = ObjectiveBinaryLogistic
+        , ensembleBaseScore     = 0.0
+        , ensembleSigmoidScale  = defaultSigmoidScale
+        , ensembleAverageOutput = False
+        , ensembleTrees         = V.singleton (makeLeafTree leafValue)
+        }
+  in makeEngine ens NoCalibrator Nothing defaultEngineConfig
+
+mlMiddlewareSpec :: Spec
+mlMiddlewareSpec = describe "ML.Middleware" $ do
+  let humanEng     = mlEngineWithLeaf (-5.0)
+      botEng       = mlEngineWithLeaf   5.0
+      challengeEng = mlEngineWithLeaf   0.0
+      ctx          = emptyFeatureContext
+      humanCfg     = defaultMLMiddlewareConfig humanEng     ctx
+      botCfg       = defaultMLMiddlewareConfig botEng       ctx
+      challengeCfg = defaultMLMiddlewareConfig challengeEng ctx
+      buildApp cfg = mlBotDetectionMiddleware cfg okApp
+
+  describe "DecisionHuman → pass through with ML signal headers" $ do
+    it "returns 200 from inner application" $ do
+      resp <- runSession (request Network.Wai.Test.defaultRequest) (buildApp humanCfg)
+      simpleStatus resp `shouldBe` status200
+
+    it "attaches X-Aenebris-ML-Decision: human" $ do
+      resp <- runSession (request Network.Wai.Test.defaultRequest) (buildApp humanCfg)
+      lookup decisionResponseHeader (simpleHeaders resp)
+        `shouldBe` Just (decisionToWireText DecisionHuman)
+
+    it "attaches X-Aenebris-ML-Score header" $ do
+      resp <- runSession (request Network.Wai.Test.defaultRequest) (buildApp humanCfg)
+      lookup scoreResponseHeader (simpleHeaders resp) `shouldSatisfy` isJust
+
+    it "omits ML signal headers when mmcAttachHeaders=False" $ do
+      let cfg  = humanCfg { mmcAttachHeaders = False }
+          app  = buildApp cfg
+      resp <- runSession (request Network.Wai.Test.defaultRequest) app
+      lookup decisionResponseHeader (simpleHeaders resp) `shouldBe` Nothing
+      lookup scoreResponseHeader    (simpleHeaders resp) `shouldBe` Nothing
+
+  describe "DecisionBot → 403 block" $ do
+    it "returns 403" $ do
+      resp <- runSession (request Network.Wai.Test.defaultRequest) (buildApp botCfg)
+      simpleStatus resp `shouldBe` status403
+
+    it "attaches X-Aenebris-ML-Decision: bot" $ do
+      resp <- runSession (request Network.Wai.Test.defaultRequest) (buildApp botCfg)
+      lookup decisionResponseHeader (simpleHeaders resp)
+        `shouldBe` Just (decisionToWireText DecisionBot)
+
+    it "responds with text/plain content type" $ do
+      resp <- runSession (request Network.Wai.Test.defaultRequest) (buildApp botCfg)
+      lookup "Content-Type" (simpleHeaders resp)
+        `shouldSatisfy` maybe False (BS.isPrefixOf "text/plain")
+
+  describe "DecisionChallenge → 403 challenge page" $ do
+    it "returns 403" $ do
+      resp <- runSession (request Network.Wai.Test.defaultRequest) (buildApp challengeCfg)
+      simpleStatus resp `shouldBe` status403
+
+    it "attaches X-Aenebris-ML-Decision: challenge" $ do
+      resp <- runSession (request Network.Wai.Test.defaultRequest) (buildApp challengeCfg)
+      lookup decisionResponseHeader (simpleHeaders resp)
+        `shouldBe` Just (decisionToWireText DecisionChallenge)
+
+    it "responds with text/html content type" $ do
+      resp <- runSession (request Network.Wai.Test.defaultRequest) (buildApp challengeCfg)
+      lookup "Content-Type" (simpleHeaders resp)
+        `shouldSatisfy` maybe False (BS.isPrefixOf "text/html")
+
+  describe "custom response builders override defaults" $
+    it "custom mmcBotResponse is used instead of the default 403" $ do
+      let customBotResp _req _details =
+            responseLBS status429
+              [("Content-Type", "text/plain")]
+              "custom bot response"
+          cfg = botCfg { mmcBotResponse = customBotResp }
+      resp <- runSession (request Network.Wai.Test.defaultRequest) (buildApp cfg)
+      simpleStatus resp `shouldBe` status429
+
+  describe "logging callback fires" $
+    it "mmcLogDetails callback is invoked once per request" $ do
+      counter <- newTVarIO (0 :: Int)
+      let logCallback _req _details =
+            atomically (modifyTVar' counter (+ 1))
+          cfg = humanCfg { mmcLogDetails = Just logCallback }
+      _ <- runSession (request Network.Wai.Test.defaultRequest) (buildApp cfg)
+      readTVarIO counter `shouldReturn` 1
 
 headersOnlyRequest :: [(BS.ByteString, BS.ByteString)] -> Request
 headersOnlyRequest hs =
