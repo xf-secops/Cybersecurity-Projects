@@ -186,6 +186,16 @@ import Aenebris.ML.Calibration
   , fitIsotonic
   , fitPlatt
   )
+import Aenebris.ML.Engine
+  ( Decision(..)
+  , DecisionDetails(..)
+  , Engine(..)
+  , EngineConfig(..)
+  , defaultEngineConfig
+  , makeEngine
+  , runEngine
+  , runEngineDecision
+  )
 import Aenebris.ML.IForest
   ( IForest(..)
   , ITree(..)
@@ -362,6 +372,7 @@ main = hspec $ do
   mlInferenceSpec
   mlCalibrationSpec
   mlIForestSpec
+  mlEngineSpec
 
 configSpec :: Spec
 configSpec = describe "Config" $ do
@@ -2554,6 +2565,111 @@ mlIForestSpec = describe "ML.IForest" $ do
 
     it "Euler-Mascheroni constant matches the standard 16-digit value" $
       eulerMascheroni `shouldBe` 0.5772156649015329
+
+mlEngineSpec :: Spec
+mlEngineSpec = describe "ML.Engine" $ do
+  let humanLeafEnsemble = binaryEnsemble [makeLeafTree (-5.0)]
+      botLeafEnsemble   = binaryEnsemble [makeLeafTree   5.0]
+      midLeafEnsemble   = binaryEnsemble [makeLeafTree   0.0]
+
+      cfg               = defaultEngineConfig
+      eng e cal mIf     = makeEngine e cal mIf cfg
+
+      lowAnomalyForest  = IForest (V.singleton (ITreeLeaf 256)) 256
+      highAnomalyForest = IForest (V.singleton (ITreeLeaf 1))   256
+
+  describe "defaultEngineConfig" $ do
+    it "uses sensible defaults" $ do
+      ecHumanThreshold       cfg `shouldBe` 0.3
+      ecBotThreshold         cfg `shouldBe` 0.7
+      ecIForestEscalation    cfg `shouldBe` 0.6
+      ecChallengeOnAmbiguous cfg `shouldBe` True
+
+  describe "decision boundaries with NoCalibrator and no IForest" $ do
+    it "very negative leaf (proba ~ 0.0067) routes to DecisionHuman" $
+      runEngineDecision (eng humanLeafEnsemble NoCalibrator Nothing) (singletonFv 0.0)
+        `shouldBe` DecisionHuman
+
+    it "very positive leaf (proba ~ 0.993) routes to DecisionBot" $
+      runEngineDecision (eng botLeafEnsemble NoCalibrator Nothing) (singletonFv 0.0)
+        `shouldBe` DecisionBot
+
+    it "midpoint leaf (proba = 0.5) lands in ambiguous band -> DecisionChallenge" $
+      runEngineDecision (eng midLeafEnsemble NoCalibrator Nothing) (singletonFv 0.0)
+        `shouldBe` DecisionChallenge
+
+  describe "ambiguous band escalation via IForest" $ do
+    it "low-anomaly IForest (score 0.5 < 0.6 escalation) keeps DecisionChallenge" $
+      runEngineDecision
+        (eng midLeafEnsemble NoCalibrator (Just lowAnomalyForest))
+        (singletonFv 0.0)
+        `shouldBe` DecisionChallenge
+
+    it "high-anomaly IForest (score 1.0 >= 0.6 escalation) escalates to DecisionBot" $
+      runEngineDecision
+        (eng midLeafEnsemble NoCalibrator (Just highAnomalyForest))
+        (singletonFv 0.0)
+        `shouldBe` DecisionBot
+
+    it "DecisionDetails records the IF score when present" $
+      ddIForestScore
+        (runEngine (eng midLeafEnsemble NoCalibrator (Just highAnomalyForest))
+                   (singletonFv 0.0))
+        `shouldBe` Just 1.0
+
+    it "DecisionDetails records Nothing for IF score when absent" $
+      ddIForestScore
+        (runEngine (eng midLeafEnsemble NoCalibrator Nothing) (singletonFv 0.0))
+        `shouldBe` Nothing
+
+  describe "ambiguous band with challenges disabled" $ do
+    let noChallengeCfg = cfg { ecChallengeOnAmbiguous = False }
+        engNoChal e cal mIf = makeEngine e cal mIf noChallengeCfg
+
+    it "ambiguous calibrated + no IForest falls through to DecisionHuman" $
+      runEngineDecision
+        (engNoChal midLeafEnsemble NoCalibrator Nothing)
+        (singletonFv 0.0)
+        `shouldBe` DecisionHuman
+
+    it "ambiguous calibrated + low-anomaly IForest still falls through to DecisionHuman" $
+      runEngineDecision
+        (engNoChal midLeafEnsemble NoCalibrator (Just lowAnomalyForest))
+        (singletonFv 0.0)
+        `shouldBe` DecisionHuman
+
+    it "ambiguous calibrated + high-anomaly IForest escalates to DecisionBot" $
+      runEngineDecision
+        (engNoChal midLeafEnsemble NoCalibrator (Just highAnomalyForest))
+        (singletonFv 0.0)
+        `shouldBe` DecisionBot
+
+  describe "calibrator changes the decision threshold" $ do
+    let almostBotEnsemble = binaryEnsemble [makeLeafTree 1.5]
+        rawProba          = 1.0 / (1.0 + exp (-1.5))
+
+    it "without calibration, raw proba in (0.7, 0.99) -> DecisionBot" $ do
+      let result = runEngine (eng almostBotEnsemble NoCalibrator Nothing) (singletonFv 0.0)
+      ddRawProba   result `shouldBe` rawProba
+      ddCalibrated result `shouldBe` rawProba
+      ddDecision   result `shouldBe` DecisionBot
+
+    it "Platt with strongly negative a*p+b pulls calibrated below human threshold" $ do
+      let cal    = PlattCalibrator (-100.0) 100.0
+          result = runEngine (eng almostBotEnsemble cal Nothing) (singletonFv 0.0)
+      ddCalibrated result `shouldSatisfy` (< 0.3)
+      ddDecision   result `shouldBe` DecisionHuman
+
+  describe "DecisionDetails mirrors all four fields" $ do
+    let result = runEngine (eng midLeafEnsemble NoCalibrator Nothing) (singletonFv 0.0)
+    it "ddDecision reflects the routing" $
+      ddDecision result `shouldBe` DecisionChallenge
+    it "ddRawProba is predictProba output (0.5 for leaf=0)" $
+      ddRawProba result `shouldBe` 0.5
+    it "ddCalibrated equals ddRawProba under NoCalibrator" $
+      ddCalibrated result `shouldBe` 0.5
+    it "ddIForestScore is Nothing when no IForest configured" $
+      ddIForestScore result `shouldBe` Nothing
 
 headersOnlyRequest :: [(BS.ByteString, BS.ByteString)] -> Request
 headersOnlyRequest hs =
