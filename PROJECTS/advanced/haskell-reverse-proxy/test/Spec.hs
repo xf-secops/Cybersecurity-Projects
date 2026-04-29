@@ -10,10 +10,13 @@ import Aenebris.Backend
   ( createRuntimeBackend
   , getConnectionCount
   , isHealthy
+  , rbActiveConnections
+  , rbConsecutiveFailures
   , rbServerId
   , rbWeight
   , recordFailure
   , recordSuccess
+  , trackConnection
   , transitionToHealthy
   , transitionToRecovering
   , transitionToUnhealthy
@@ -30,7 +33,8 @@ import Aenebris.Config
   , validateConfig
   )
 import Aenebris.DDoS.ConnLimit
-  ( defaultConnLimitConfig
+  ( currentCount
+  , defaultConnLimitConfig
   , defaultPerIPLimit
   , ipBytesFromSockAddr
   , newConnLimiter
@@ -262,6 +266,7 @@ import Control.Concurrent.STM
   ( atomically
   , modifyTVar'
   , newTVarIO
+  , readTVar
   , readTVarIO
   )
 import qualified Data.ByteString as BS
@@ -477,31 +482,46 @@ loadBalancerSpec = describe "LoadBalancer" $ do
     lb <- createLoadBalancer RoundRobin []
     selectBackend lb `shouldReturn` Nothing
 
-  it "selects from backend pool with round robin" $ do
+  it "round robin distributes evenly across the pool" $ do
     bks <- mapM (\(i, h) -> createRuntimeBackend i (Server h 1))
                 [(0, "host-a:80"), (1, "host-b:80"), (2, "host-c:80")]
     lb <- createLoadBalancer RoundRobin bks
-    let getName = fmap (fmap rbServerId) (selectBackend lb)
-    a <- getName
-    b <- getName
-    c <- getName
-    isJust a `shouldBe` True
-    isJust b `shouldBe` True
-    isJust c `shouldBe` True
+    let totalRounds = 9 :: Int
+    selections <- mapM
+      (\_ -> fmap (fmap rbServerId) (selectBackend lb))
+      [1 .. totalRounds]
+    let counts =
+          [ length (filter (== Just sid) selections)
+          | sid <- [0, 1, 2]
+          ]
+    counts `shouldBe` [3, 3, 3]
 
-  it "selects backend with weighted round robin" $ do
+  it "weighted round robin selects proportionally" $ do
     bks <- mapM (\(i, h, w) -> createRuntimeBackend i (Server h w))
                 [(0, "host-a:80", 1), (1, "host-b:80", 4)]
     lb <- createLoadBalancer WeightedRoundRobin bks
-    selected <- selectBackend lb
-    isJust selected `shouldBe` True
+    let totalRounds = 50 :: Int
+    selections <- mapM
+      (\_ -> fmap (fmap rbServerId) (selectBackend lb))
+      [1 .. totalRounds]
+    let countA = length (filter (== Just 0) selections)
+        countB = length (filter (== Just 1) selections)
+    countB `shouldSatisfy` (>= 35)
+    countA `shouldSatisfy` (<= 15)
 
-  it "selects least connections backend" $ do
+  it "least connections picks the backend with fewest active connections" $ do
     bks <- mapM (\(i, h) -> createRuntimeBackend i (Server h 1))
                 [(0, "host-a:80"), (1, "host-b:80")]
-    lb <- createLoadBalancer LeastConnections bks
-    selected <- selectBackend lb
-    isJust selected `shouldBe` True
+    case bks of
+      [a, _b] -> do
+        atomically $
+          modifyTVar'
+            (rbActiveConnections a)
+            (+ 5)
+        lb <- createLoadBalancer LeastConnections bks
+        selected <- selectBackend lb
+        fmap rbServerId selected `shouldBe` Just 1
+      _ -> expectationFailure "expected exactly two backends"
 
 backendSpec :: Spec
 backendSpec = describe "Backend" $ do
@@ -526,17 +546,21 @@ backendSpec = describe "Backend" $ do
     bk <- createRuntimeBackend 0 (Server "host:80" 1)
     atomically (getConnectionCount bk) `shouldReturn` 0
 
-  it "tolerates repeated failures" $ do
+  it "transitions to Unhealthy after maxFailures consecutive failures" $ do
     bk <- createRuntimeBackend 0 (Server "host:80" 10)
-    atomically $ recordFailure bk 3
-    atomically $ recordFailure bk 3
-    atomically $ recordFailure bk 3
-    rbWeight bk `shouldBe` 10
+    atomically (recordFailure bk 3)
+    atomically (isHealthy bk) `shouldReturn` True
+    atomically (recordFailure bk 3)
+    atomically (isHealthy bk) `shouldReturn` True
+    atomically (recordFailure bk 3)
+    atomically (isHealthy bk) `shouldReturn` False
 
-  it "records successes without crashing" $ do
+  it "recordSuccess on Healthy resets the failure counter" $ do
     bk <- createRuntimeBackend 0 (Server "host:80" 5)
-    atomically $ recordSuccess bk 5
-    pure ()
+    atomically (recordFailure bk 5)
+    atomically (readTVar (rbConsecutiveFailures bk)) `shouldReturn` 1
+    atomically (recordSuccess bk 5)
+    atomically (readTVar (rbConsecutiveFailures bk)) `shouldReturn` 0
 
 securitySpec :: Spec
 securitySpec = describe "Security headers" $ do
@@ -752,11 +776,12 @@ connLimitSpec = describe "ConnLimit" $ do
     res <- atomically (tryAcquire cl "9.9.9.9")
     res `shouldBe` False
 
-  it "release decrements counter" $ do
+  it "release decrements counter back to 0" $ do
     cl <- newConnLimiter defaultConnLimitConfig
     _ <- atomically (tryAcquire cl "1.2.3.4")
+    atomically (currentCount cl "1.2.3.4") `shouldReturn` 1
     atomically (release cl "1.2.3.4")
-    pure ()
+    atomically (currentCount cl "1.2.3.4") `shouldReturn` 0
 
 ja4hSpec :: Spec
 ja4hSpec = describe "JA4H fingerprint" $ do

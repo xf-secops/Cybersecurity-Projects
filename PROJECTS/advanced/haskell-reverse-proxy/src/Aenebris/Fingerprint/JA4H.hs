@@ -88,11 +88,6 @@ refererHeaderName = "referer"
 acceptLanguageHeaderName :: CI ByteString
 acceptLanguageHeaderName = "accept-language"
 
-lookupCI :: CI ByteString -> [(CI ByteString, ByteString)] -> Maybe ByteString
-lookupCI k hs = case filter ((== k) . fst) hs of
-  ((_, v) : _) -> Just v
-  _ -> Nothing
-
 acceptLanguagePrefix :: ByteString -> ByteString
 acceptLanguagePrefix bs =
   let firstTag = BS.takeWhile (\c -> c /= 0x2c && c /= 0x3b && c /= 0x20) bs
@@ -136,7 +131,7 @@ computeJA4H req =
         filter (\(k, _) -> k /= cookieHeaderName && k /= refererHeaderName) rawHeaders
       headerCount = padTwo (length filteredHeaders)
       langPrefix = maybe "0000" acceptLanguagePrefix
-                 $ lookupCI acceptLanguageHeaderName rawHeaders
+                 $ lookup acceptLanguageHeaderName rawHeaders
       partA = BS.concat [method, version, cookieFlag, refererFlag, headerCount, langPrefix]
       headerNameList = BS.intercalate "," (map (CI.original . fst) filteredHeaders)
       headerHash = hashTruncated headerNameList

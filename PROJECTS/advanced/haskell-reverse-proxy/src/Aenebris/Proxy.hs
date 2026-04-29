@@ -1,6 +1,10 @@
+{-
+©AngelaMos | 2026
+Proxy.hs
+-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 module Aenebris.Proxy
   ( ProxyState(..)
@@ -25,7 +29,12 @@ import Aenebris.TLS
 import Aenebris.Tunnel
 import Aenebris.Middleware.Security
 import Aenebris.Middleware.Redirect
-import Aenebris.RateLimit (RateLimiter, createRateLimiter, parseRateSpec, rateLimitMiddleware)
+import Aenebris.RateLimit
+  ( RateLimiter
+  , createRateLimiter
+  , parseRateSpec
+  , rateLimitMiddleware
+  )
 import Aenebris.DDoS.EarlyData (earlyDataGuard)
 import Aenebris.DDoS.MemoryShed
   ( MemoryShed
@@ -72,7 +81,13 @@ import Aenebris.Geo
   )
 import Control.Concurrent.STM (TVar, newTVarIO)
 import Control.Concurrent.Async (Async, async, waitAnyCancel)
-import Control.Exception (try, SomeException)
+import Control.Exception (SomeException, try)
+import Control.Monad (unless, zipWithM)
+import Data.ByteString (ByteString)
+import qualified Data.ByteString as BS
+import qualified Data.ByteString.Char8 as BS8
+import Data.ByteString.Builder (byteString)
+import qualified Data.ByteString.Lazy as LBS
 import Data.Function ((&))
 import Data.List (sortBy)
 import Data.Map.Strict (Map)
@@ -82,12 +97,16 @@ import Data.Ord (comparing)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
-import Network.HTTP.Client (Manager, withResponse, parseRequest, RequestBody(..), brRead)
+import Network.HTTP.Client
+  ( Manager
+  , RequestBody(..)
+  , brRead
+  , parseRequest
+  , withResponse
+  )
 import qualified Network.HTTP.Client as HTTP
 import Network.HTTP.Types
 import Network.Wai
-import Data.ByteString.Builder (byteString)
-import Control.Monad (unless)
 import Network.Wai.Handler.Warp
   ( Settings
   , defaultSettings
@@ -102,33 +121,77 @@ import Network.Wai.Handler.WarpTLS (runTLS)
 import System.Exit (exitFailure)
 import System.IO (hPutStrLn, stderr)
 import System.Timeout (timeout)
-import Data.ByteString (ByteString)
-import qualified Data.ByteString as BS
-import qualified Data.ByteString.Char8 as BS8
-import qualified Data.ByteString.Lazy as LBS
 
--- | Proxy runtime state
+memoryShedPollIntervalMicros :: Int
+memoryShedPollIntervalMicros = microsPerSecond
+
+contentTypePlain :: ByteString
+contentTypePlain = "text/plain"
+
+bodyNotFound :: LBS.ByteString
+bodyNotFound = "Not Found: No route configured for this host/path"
+
+bodyUpstreamMisconfigured :: LBS.ByteString
+bodyUpstreamMisconfigured = "Internal Server Error: Upstream configuration error"
+
+bodyNoHealthyBackends :: LBS.ByteString
+bodyNoHealthyBackends = "Service Unavailable: No healthy backends available"
+
+bodyBadGateway :: LBS.ByteString
+bodyBadGateway = "Bad Gateway: Could not connect to backend server"
+
+bodyGatewayTimeout :: LBS.ByteString
+bodyGatewayTimeout = "504 Gateway Timeout: upstream did not respond in time"
+
+bodyWebSocketUpgradeFailed :: LBS.ByteString
+bodyWebSocketUpgradeFailed = "WebSocket upgrade failed"
+
+hopByHopRequestHeaders :: [HeaderName]
+hopByHopRequestHeaders =
+  [ "Connection"
+  , "Keep-Alive"
+  , "Proxy-Authenticate"
+  , "Proxy-Authorization"
+  , "TE"
+  , "Trailers"
+  , "Transfer-Encoding"
+  , "Upgrade"
+  ]
+
+hopByHopResponseHeaders :: [HeaderName]
+hopByHopResponseHeaders =
+  [ "Transfer-Encoding"
+  , "Connection"
+  , "Keep-Alive"
+  ]
+
+eventStreamContentType :: ByteString
+eventStreamContentType = "text/event-stream"
+
+chunkedEncoding :: ByteString
+chunkedEncoding = "chunked"
+
+httpScheme :: String
+httpScheme = "http://"
+
 data ProxyState = ProxyState
-  { psConfig :: Config
-  , psLoadBalancers :: Map Text LoadBalancer  -- upstream name -> load balancer
-  , psHealthCheckers :: [Async ()]
-  , psManager :: Manager
-  , psRateLimiter :: Maybe RateLimiter
-  , psMemoryShed :: Maybe MemoryShed
-  , psIPJail :: Maybe IPJail
-  , psConnLimiter :: Maybe ConnLimiter
-  , psWafRuleSet :: TVar RuleSet
-  , psGeo :: Maybe Geo
+  { psConfig         :: !Config
+  , psLoadBalancers  :: !(Map Text LoadBalancer)
+  , psHealthCheckers :: ![Async ()]
+  , psManager        :: !Manager
+  , psRateLimiter    :: !(Maybe RateLimiter)
+  , psMemoryShed     :: !(Maybe MemoryShed)
+  , psIPJail         :: !(Maybe IPJail)
+  , psConnLimiter    :: !(Maybe ConnLimiter)
+  , psWafRuleSet     :: !(TVar RuleSet)
+  , psGeo            :: !(Maybe Geo)
   }
 
--- | Initialize proxy state from config
 initProxyState :: Config -> Manager -> IO ProxyState
 initProxyState config manager = do
-  -- Create load balancers for each upstream
   lbs <- mapM createUpstreamLoadBalancer (configUpstreams config)
-  let lbMap = Map.fromList (zip (map upstreamName $ configUpstreams config) lbs)
+  let lbMap = Map.fromList (zip (map upstreamName (configUpstreams config)) lbs)
 
-  -- Start health checkers for all upstreams
   checkers <- mapM startUpstreamHealthChecker (configUpstreams config)
 
   rateLimiter <- case configRateLimit config >>= parseRateSpec of
@@ -142,8 +205,9 @@ initProxyState config manager = do
       ms <- newMemoryShed
       let cfg = MemoryShedConfig
             { mscHeapBudgetBytes = fromInteger budgetBytes
-            , mscHighWaterFraction = fromMaybe defaultHighWaterFraction (ddos >>= ddosMemoryShedHighWater)
-            , mscPollIntervalMicros = 1000000
+            , mscHighWaterFraction = fromMaybe defaultHighWaterFraction
+                (ddos >>= ddosMemoryShedHighWater)
+            , mscPollIntervalMicros = memoryShedPollIntervalMicros
             }
       _ <- startMemoryShedPoller cfg ms
       pure (Just ms)
@@ -170,57 +234,45 @@ initProxyState config manager = do
     Nothing -> pure Nothing
 
   return ProxyState
-    { psConfig = config
-    , psLoadBalancers = lbMap
+    { psConfig         = config
+    , psLoadBalancers  = lbMap
     , psHealthCheckers = checkers
-    , psManager = manager
-    , psRateLimiter = rateLimiter
-    , psMemoryShed = memShed
-    , psIPJail = ipJail
-    , psConnLimiter = connLimiter
-    , psWafRuleSet = wafVar
-    , psGeo = geoHandle
+    , psManager        = manager
+    , psRateLimiter    = rateLimiter
+    , psMemoryShed     = memShed
+    , psIPJail         = ipJail
+    , psConnLimiter    = connLimiter
+    , psWafRuleSet     = wafVar
+    , psGeo            = geoHandle
     }
   where
-    -- Create load balancer for an upstream
     createUpstreamLoadBalancer :: Upstream -> IO LoadBalancer
     createUpstreamLoadBalancer upstream = do
-      -- Convert Config Servers to RuntimeBackends
       backends <- zipWithM createRuntimeBackend [0..] (upstreamServers upstream)
-
-      -- Determine strategy (for now, use weighted if weights differ, else round-robin)
       let weights = map serverWeight (upstreamServers upstream)
           strategy = case weights of
-            [] -> RoundRobin  -- No backends, shouldn't happen but be safe
-            (w:ws) -> if all (== w) ws
-                        then RoundRobin
-                        else WeightedRoundRobin
-
+            [] -> RoundRobin
+            (w:ws)
+              | all (== w) ws -> RoundRobin
+              | otherwise     -> WeightedRoundRobin
       createLoadBalancer strategy backends
 
-    -- Start health checker for an upstream
     startUpstreamHealthChecker :: Upstream -> IO (Async ())
     startUpstreamHealthChecker upstream = do
       backends <- zipWithM createRuntimeBackend [0..] (upstreamServers upstream)
-
-      -- Use health check config from upstream, or defaults
       let hcConfig = case upstreamHealthCheck upstream of
             Just hc -> defaultHealthCheckConfig
-              { hcInterval = 10  -- TODO: parse interval from config
-              , hcEndpoint = healthCheckPath hc
+              { hcEndpoint = healthCheckPath hc
               }
             Nothing -> defaultHealthCheckConfig
-
       startHealthChecker manager hcConfig backends
 
--- | Start the proxy server with given configuration
--- Supports multiple ports with HTTP and HTTPS (including SNI)
 startProxy :: ProxyState -> IO ()
 startProxy ProxyState{..} = do
-  putStrLn $ "Starting Ᾰenebris reverse proxy"
-  putStrLn $ "Loaded " ++ show (length $ configUpstreams psConfig) ++ " upstream(s)"
-  putStrLn $ "Loaded " ++ show (length $ configRoutes psConfig) ++ " route(s)"
-  putStrLn $ "Health checking enabled for all upstreams"
+  putStrLn "Starting Aenebris reverse proxy"
+  putStrLn $ "Loaded " ++ show (length (configUpstreams psConfig)) ++ " upstream(s)"
+  putStrLn $ "Loaded " ++ show (length (configRoutes psConfig)) ++ " route(s)"
+  putStrLn "Health checking enabled for all upstreams"
 
   case configListen psConfig of
     [] -> do
@@ -228,28 +280,37 @@ startProxy ProxyState{..} = do
       exitFailure
     listenConfigs -> do
       case psRateLimiter of
-        Just _ -> putStrLn "Rate limiting enabled"
+        Just _  -> putStrLn "Rate limiting enabled"
         Nothing -> pure ()
 
       putStrLn "WAF enabled (Phase 1: paranoia level 2, default rule pack)"
       case buildHoneypotConfig (configHoneypot psConfig) of
-        Just hp -> putStrLn $ "Honeypot enabled (" ++ show (length (hpPatterns hp))
-                              ++ " trap patterns, action=" ++ show (hpAction hp) ++ ")"
+        Just hp -> putStrLn $
+          "Honeypot enabled ("
+            ++ show (length (hpPatterns hp))
+            ++ " trap patterns, action="
+            ++ show (hpAction hp)
+            ++ ")"
         Nothing -> pure ()
       case psGeo of
         Just g ->
           let gc = geoConfig g
-              parts = [ "country_db=" ++ maybe "off" (const "on") (gcCountryDb gc)
-                      , "asn_db=" ++ maybe "off" (const "on") (gcAsnDb gc)
-                      , "blocked=" ++ show (length (gcBlockedCountries gc))
-                      , "flagged_asns=" ++ show (length (gcFlaggedAsns gc))
-                      ]
+              parts =
+                [ "country_db=" ++ maybe "off" (const "on") (gcCountryDb gc)
+                , "asn_db=" ++ maybe "off" (const "on") (gcAsnDb gc)
+                , "blocked=" ++ show (length (gcBlockedCountries gc))
+                , "flagged_asns=" ++ show (length (gcFlaggedAsns gc))
+                ]
           in putStrLn $ "Geo/ASN enabled (" ++ unwords parts ++ ")"
         Nothing -> pure ()
-      servers <- mapM (launchServer psConfig psLoadBalancers psManager psRateLimiter psMemoryShed psIPJail psConnLimiter psWafRuleSet psGeo) listenConfigs
+
+      servers <- mapM
+        (launchServer psConfig psLoadBalancers psManager
+                      psRateLimiter psMemoryShed psIPJail
+                      psConnLimiter psWafRuleSet psGeo)
+        listenConfigs
 
       _ <- waitAnyCancel servers
-
       putStrLn "All servers stopped"
 
 launchServer
@@ -264,265 +325,253 @@ launchServer
   -> Maybe Geo
   -> ListenConfig
   -> IO (Async ())
-launchServer config loadBalancers manager mRateLimiter mMemShed mIPJail mConnLim wafVar mGeo listenConfig = async $ do
-  let port = listenPort listenConfig
-      shouldRedirect = fromMaybe False (listenRedirectHTTPS listenConfig)
-      ddosCfg = fromMaybe defaultDDoSConfig (configDDoS config)
+launchServer config loadBalancers manager mRateLimiter mMemShed mIPJail mConnLim wafVar mGeo listenConfig =
+  async $ do
+    let port = listenPort listenConfig
+        shouldRedirect = fromMaybe False (listenRedirectHTTPS listenConfig)
+        ddosCfg = fromMaybe defaultDDoSConfig (configDDoS config)
 
-      baseApp = proxyApp config loadBalancers manager
+        baseApp          = proxyApp config loadBalancers manager
+        fingerprintedApp = ja4hMiddleware baseApp
+        wafApp           = wafMiddleware wafVar fingerprintedApp
+        securedApp       = addSecurityHeaders defaultSecurityConfig wafApp
 
-      fingerprintedApp = ja4hMiddleware baseApp
+        earlyDataApp     = if ddosEarlyDataReject ddosCfg
+                             then earlyDataGuard securedApp
+                             else securedApp
 
-      wafApp = wafMiddleware wafVar fingerprintedApp
+        mHoneypotCfg     = buildHoneypotConfig (configHoneypot config)
+        honeypotApp      = case mHoneypotCfg of
+          Just hp -> honeypotMiddleware hp mIPJail earlyDataApp
+          Nothing -> earlyDataApp
 
-      securedApp = addSecurityHeaders defaultSecurityConfig wafApp
+        geoApp = case mGeo of
+          Just g  -> geoMiddleware g mIPJail honeypotApp
+          Nothing -> honeypotApp
 
-      earlyDataApp = if ddosEarlyDataReject ddosCfg
-        then earlyDataGuard securedApp
-        else securedApp
+        jailedApp = case mIPJail of
+          Just j  -> ipJailMiddleware j geoApp
+          Nothing -> geoApp
 
-      mHoneypotCfg = buildHoneypotConfig (configHoneypot config)
+        shedApp = case mMemShed of
+          Just ms -> memoryShedMiddleware ms jailedApp
+          Nothing -> jailedApp
 
-      honeypotApp = case mHoneypotCfg of
-        Just hp -> honeypotMiddleware hp mIPJail earlyDataApp
-        Nothing -> earlyDataApp
+        limitedApp = case mRateLimiter of
+          Just rl -> rateLimitMiddleware rl shedApp
+          Nothing -> shedApp
 
-      geoApp = case mGeo of
-        Just g -> geoMiddleware g mIPJail honeypotApp
-        Nothing -> honeypotApp
+        warpSettings = applyDDoSSettings ddosCfg mConnLim
+                                        (defaultSettings & setPort port)
 
-      jailedApp = case mIPJail of
-        Just j -> ipJailMiddleware j geoApp
-        Nothing -> geoApp
+    case listenTLS listenConfig of
+      Nothing -> do
+        let app = if shouldRedirect
+                    then httpsRedirect limitedApp
+                    else limitedApp
+        putStrLn $ "* HTTP server listening on :" ++ show port
+        if shouldRedirect
+          then putStrLn "  Redirecting all traffic to HTTPS"
+          else pure ()
+        runSettings warpSettings app
 
-      shedApp = case mMemShed of
-        Just ms -> memoryShedMiddleware ms jailedApp
-        Nothing -> jailedApp
-
-      limitedApp = case mRateLimiter of
-        Just rl -> rateLimitMiddleware rl shedApp
-        Nothing -> shedApp
-
-      warpSettings = applyDDoSSettings ddosCfg mConnLim (defaultSettings & setPort port)
-
-  case listenTLS listenConfig of
-    Nothing -> do
-      let app = if shouldRedirect
-                then httpsRedirect limitedApp
-                else limitedApp
-
-      putStrLn $ "✓ HTTP server listening on :" ++ show port
-      if shouldRedirect
-        then putStrLn $ "  └─ Redirecting all traffic to HTTPS"
-        else return ()
-
-      runSettings warpSettings app
-
-    Just tlsConfig -> do
-      let isSNI = case tlsSNI tlsConfig of
-            Just domains -> not (null domains)
-            Nothing -> False
-
-      if isSNI
-        then launchHTTPSWithSNI port tlsConfig limitedApp
-        else launchHTTPS port tlsConfig limitedApp
+      Just tlsConfig -> do
+        let isSNI = case tlsSNI tlsConfig of
+              Just domains -> not (null domains)
+              Nothing      -> False
+        if isSNI
+          then launchHTTPSWithSNI port tlsConfig limitedApp
+          else launchHTTPS port tlsConfig limitedApp
 
 applyDDoSSettings :: DDoSConfig -> Maybe ConnLimiter -> Settings -> Settings
 applyDDoSSettings ddos mConnLim s0 =
-  let s1 = case ddosMaxHeaderBytes ddos of
-        Just n -> setMaxTotalHeaderLength n s1Inner
-        Nothing -> s1Inner
-      s1Inner = case ddosSlowlorisSeconds ddos of
-        Just n -> setTimeout n s0
+  let s1Inner = case ddosSlowlorisSeconds ddos of
+        Just n  -> setTimeout n s0
         Nothing -> s0
+      s1 = case ddosMaxHeaderBytes ddos of
+        Just n  -> setMaxTotalHeaderLength n s1Inner
+        Nothing -> s1Inner
       s2 = case mConnLim of
-        Just cl -> setOnClose (connLimitOnClose cl) (setOnOpen (connLimitOnOpen cl) s1)
+        Just cl -> setOnClose (connLimitOnClose cl)
+                     (setOnOpen (connLimitOnOpen cl) s1)
         Nothing -> s1
   in s2
 
--- | Launch HTTPS server with single certificate
 launchHTTPS :: Int -> TLSConfig -> Application -> IO ()
-launchHTTPS port tlsConfig app = do
+launchHTTPS port tlsConfig app =
   case (tlsCert tlsConfig, tlsKey tlsConfig) of
     (Just certFile, Just keyFile) -> do
-      -- Load TLS settings
       tlsResult <- createTLSSettings certFile keyFile
       case tlsResult of
         Left err -> do
           hPutStrLn stderr "ERROR: Failed to load TLS certificate"
           hPutStrLn stderr $ "  " ++ show err
           exitFailure
-
         Right tlsSettings -> do
           let warpSettings = defaultSettings & setPort port
-          putStrLn $ "✓ HTTPS server listening on :" ++ show port
-          putStrLn $ "  ├─ Certificate: " ++ certFile
-          putStrLn $ "  ├─ TLS 1.2 + TLS 1.3 enabled"
-          putStrLn $ "  ├─ HTTP/2 enabled (ALPN)"
-          putStrLn $ "  └─ Strong cipher suites enforced"
+          putStrLn $ "* HTTPS server listening on :" ++ show port
+          putStrLn $ "  Certificate: " ++ certFile
+          putStrLn   "  TLS 1.2 + TLS 1.3 enabled"
+          putStrLn   "  HTTP/2 enabled (ALPN)"
+          putStrLn   "  Strong cipher suites enforced"
           runTLS tlsSettings warpSettings app
-
     _ -> do
       hPutStrLn stderr "ERROR: TLS configuration requires both cert and key"
       exitFailure
 
--- | Launch HTTPS server with SNI support (multiple certificates)
 launchHTTPSWithSNI :: Int -> TLSConfig -> Application -> IO ()
-launchHTTPSWithSNI port tlsConfig app = do
+launchHTTPSWithSNI port tlsConfig app =
   case (tlsSNI tlsConfig, tlsDefaultCert tlsConfig, tlsDefaultKey tlsConfig) of
     (Just sniDomains, Just defaultCert, Just defaultKey) -> do
-      -- Convert SNIDomain list to the format expected by createSNISettings
       let domainList = [(sniDomain d, sniCert d, sniKey d) | d <- sniDomains]
-
-      -- Load SNI TLS settings
       tlsResult <- createSNISettings domainList defaultCert defaultKey
       case tlsResult of
         Left err -> do
           hPutStrLn stderr "ERROR: Failed to load SNI certificates"
           hPutStrLn stderr $ "  " ++ show err
           exitFailure
-
         Right tlsSettings -> do
           let warpSettings = defaultSettings & setPort port
-          putStrLn $ "✓ HTTPS server with SNI listening on :" ++ show port
-          putStrLn $ "  ├─ SNI domains: " ++ show (length sniDomains) ++ " configured"
-          mapM_ (\d -> putStrLn $ "  │  • " ++ T.unpack (sniDomain d) ++ " -> " ++ sniCert d) sniDomains
-          putStrLn $ "  ├─ Default certificate: " ++ defaultCert
-          putStrLn $ "  ├─ TLS 1.2 + TLS 1.3 enabled"
-          putStrLn $ "  ├─ HTTP/2 enabled (ALPN)"
-          putStrLn $ "  └─ Strong cipher suites enforced"
+          putStrLn $ "* HTTPS server with SNI listening on :" ++ show port
+          putStrLn $ "  SNI domains: " ++ show (length sniDomains) ++ " configured"
+          mapM_
+            (\d -> putStrLn $
+              "    " ++ T.unpack (sniDomain d) ++ " -> " ++ sniCert d)
+            sniDomains
+          putStrLn $ "  Default certificate: " ++ defaultCert
+          putStrLn   "  TLS 1.2 + TLS 1.3 enabled"
+          putStrLn   "  HTTP/2 enabled (ALPN)"
+          putStrLn   "  Strong cipher suites enforced"
           runTLS tlsSettings warpSettings app
-
     _ -> do
-      hPutStrLn stderr
-        "ERROR: SNI requires sni, default_cert, and default_key"
+      hPutStrLn stderr "ERROR: SNI requires sni, default_cert, and default_key"
       exitFailure
 
--- | Main proxy application (WAI)
 proxyApp :: Config -> Map Text LoadBalancer -> Manager -> Application
 proxyApp config loadBalancers manager req respond = do
-  logRequest req
-
-  let hostHeader = lookup "Host" (requestHeaders req)
+  let hostHeader  = lookup "Host" (requestHeaders req)
       requestPath = rawPathInfo req
-      headers = requestHeaders req
-      connType = detectConnectionType headers
+      headers     = requestHeaders req
+      connType    = detectConnectionType headers
 
   case selectRoute config hostHeader requestPath of
     Nothing -> do
-      hPutStrLn stderr $ "ERROR: No route found for request"
+      hPutStrLn stderr "ERROR: No route found for request"
       respond $ responseLBS
         status404
-        [("Content-Type", "text/plain")]
-        "Not Found: No route configured for this host/path"
+        [(hContentType, contentTypePlain)]
+        bodyNotFound
 
-    Just (upstreamName, _pathRoute) -> do
+    Just (upstreamName, _pathRoute) ->
       case Map.lookup upstreamName loadBalancers of
         Nothing -> do
-          hPutStrLn stderr $ "ERROR: Load balancer not found: " ++ T.unpack upstreamName
+          hPutStrLn stderr $
+            "ERROR: Load balancer not found: " ++ T.unpack upstreamName
           respond $ responseLBS
             status500
-            [("Content-Type", "text/plain")]
-            "Internal Server Error: Upstream configuration error"
+            [(hContentType, contentTypePlain)]
+            bodyUpstreamMisconfigured
 
         Just loadBalancer -> do
           mBackend <- selectBackend loadBalancer
-
           case mBackend of
             Nothing -> do
-              hPutStrLn stderr $ "ERROR: No healthy backends available"
+              hPutStrLn stderr "ERROR: No healthy backends available"
               respond $ responseLBS
                 status503
-                [("Content-Type", "text/plain")]
-                "Service Unavailable: No healthy backends available"
+                [(hContentType, contentTypePlain)]
+                bodyNoHealthyBackends
 
-            Just backend -> do
-              case connType of
-                WebSocket -> do
-                  hPutStrLn stderr $ "[WS] WebSocket upgrade detected"
-                  handleWebSocketUpgrade req respond backend
+            Just backend -> case connType of
+              WebSocket -> do
+                hPutStrLn stderr "[WS] WebSocket upgrade detected"
+                handleWebSocketUpgrade req respond backend
+              _ ->
+                forwardRegular manager backend req respond
 
-                RegularHttp -> do
-                  result <- try $ trackConnection backend $
-                    forwardRequest manager req (rbHost backend) respond
+forwardRegular
+  :: Manager
+  -> RuntimeBackend
+  -> Request
+  -> (Response -> IO ResponseReceived)
+  -> IO ResponseReceived
+forwardRegular manager backend req respond = do
+  result <- try $ trackConnection backend $
+    forwardRequest manager req (rbHost backend) respond
+  case result of
+    Left (err :: SomeException) -> do
+      hPutStrLn stderr $ "ERROR: " ++ show err
+      respond $ responseLBS
+        status502
+        [(hContentType, contentTypePlain)]
+        bodyBadGateway
+    Right responseReceived ->
+      pure responseReceived
 
-                  case result of
-                    Left (err :: SomeException) -> do
-                      hPutStrLn stderr $ "ERROR: " ++ show err
-                      respond $ responseLBS
-                        status502
-                        [("Content-Type", "text/plain")]
-                        "Bad Gateway: Could not connect to backend server"
-
-                    Right responseReceived ->
-                      return responseReceived
-
-                _ -> do
-                  result <- try $ trackConnection backend $
-                    forwardRequest manager req (rbHost backend) respond
-
-                  case result of
-                    Left (err :: SomeException) -> do
-                      hPutStrLn stderr $ "ERROR: " ++ show err
-                      respond $ responseLBS
-                        status502
-                        [("Content-Type", "text/plain")]
-                        "Bad Gateway: Could not connect to backend server"
-
-                    Right responseReceived ->
-                      return responseReceived
-
-handleWebSocketUpgrade :: Request -> (Response -> IO ResponseReceived) -> RuntimeBackend -> IO ResponseReceived
+handleWebSocketUpgrade
+  :: Request
+  -> (Response -> IO ResponseReceived)
+  -> RuntimeBackend
+  -> IO ResponseReceived
 handleWebSocketUpgrade req respond backend = do
   let backendHost = rbHost backend
       backupResponse = responseLBS
         status502
-        [("Content-Type", "text/plain")]
-        "WebSocket upgrade failed"
-
+        [(hContentType, contentTypePlain)]
+        bodyWebSocketUpgradeFailed
   respond $ responseRaw (wsHandler req backendHost) backupResponse
 
-wsHandler :: Request -> Text -> IO ByteString -> (ByteString -> IO ()) -> IO ()
+wsHandler
+  :: Request
+  -> Text
+  -> IO ByteString
+  -> (ByteString -> IO ())
+  -> IO ()
 wsHandler req backendHost recv send = do
   hPutStrLn stderr $ "[WS] Starting WebSocket tunnel to " ++ T.unpack backendHost
   tunnelWebSocket req backendHost send recv
 
--- | Select a route based on Host header and path
-selectRoute :: Config -> Maybe BS.ByteString -> BS.ByteString -> Maybe (Text, PathRoute)
-selectRoute config hostHeader requestPath =
-  case hostHeader of
-    Nothing -> Nothing  -- No Host header, can't route
-    Just host -> do
-      -- Find route matching this host
-      let hostText = TE.decodeUtf8 host
-          matchingRoutes = filter (\r -> routeHost r == hostText) (configRoutes config)
+selectRoute
+  :: Config
+  -> Maybe BS.ByteString
+  -> BS.ByteString
+  -> Maybe (Text, PathRoute)
+selectRoute config hostHeader requestPath = case hostHeader of
+  Nothing   -> Nothing
+  Just host -> do
+    let hostText        = TE.decodeUtf8 host
+        matchingRoutes  = filter (\r -> routeHost r == hostText)
+                                 (configRoutes config)
+    route <- listToMaybe matchingRoutes
+    let requestPathText = TE.decodeUtf8 requestPath
+        sortedPaths     = sortBy
+                            (comparing (negate . T.length . pathRoutePath))
+                            (routePaths route)
+        matchingPaths   = filter
+                            (\p -> pathMatches (pathRoutePath p) requestPathText)
+                            sortedPaths
+    pathRoute <- listToMaybe matchingPaths
+    return (pathRouteUpstream pathRoute, pathRoute)
 
-      -- Find first matching path within the route
-      route <- listToMaybe matchingRoutes
-      let requestPathText = TE.decodeUtf8 requestPath
-          -- Sort paths by length (longest first) so more specific paths match first
-          sortedPaths = sortBy (comparing (negate . T.length . pathRoutePath)) (routePaths route)
-          matchingPaths = filter (\p -> pathMatches (pathRoutePath p) requestPathText) sortedPaths
-
-      pathRoute <- listToMaybe matchingPaths
-      return (pathRouteUpstream pathRoute, pathRoute)
-
--- | Check if a path pattern matches a request path
 pathMatches :: Text -> Text -> Bool
 pathMatches pattern requestPath =
   pattern == "/" || T.isPrefixOf pattern requestPath
 
--- | Select an upstream for a request (exported for testing)
-selectUpstream :: Config -> Maybe BS.ByteString -> BS.ByteString -> Maybe Text
+selectUpstream
+  :: Config -> Maybe BS.ByteString -> BS.ByteString -> Maybe Text
 selectUpstream config hostHeader requestPath =
-  fmap fst $ selectRoute config hostHeader requestPath
+  fst <$> selectRoute config hostHeader requestPath
 
--- | Forward request to backend server with streaming support
-forwardRequest :: Manager -> Request -> Text -> (Response -> IO ResponseReceived) -> IO ResponseReceived
+forwardRequest
+  :: Manager
+  -> Request
+  -> Text
+  -> (Response -> IO ResponseReceived)
+  -> IO ResponseReceived
 forwardRequest manager clientReq backendHost respond = do
-  let backendUrl = "http://" ++ T.unpack backendHost ++
-                   BS8.unpack (rawPathInfo clientReq) ++
-                   BS8.unpack (rawQueryString clientReq)
+  let backendUrl = httpScheme ++ T.unpack backendHost
+                ++ BS8.unpack (rawPathInfo clientReq)
+                ++ BS8.unpack (rawQueryString clientReq)
 
   initReq <- parseRequest backendUrl
 
@@ -536,56 +585,53 @@ forwardRequest manager clientReq backendHost respond = do
 
       backendReq = initReq
         { HTTP.method = requestMethod clientReq
-        , HTTP.requestHeaders = filterHeaders (requestHeaders clientReq)
+        , HTTP.requestHeaders = filterRequestHeaders (requestHeaders clientReq)
         , HTTP.requestBody = streamingBody
         }
 
-  let upstreamMicros = tcUpstreamReadSeconds defaultTimeoutConfig
+      upstreamMicros = tcUpstreamReadSeconds defaultTimeoutConfig
                      * microsPerSecond
+
   mResult <- timeout upstreamMicros $
     withResponse backendReq manager $ \backendResponse -> do
-      let status = HTTP.responseStatus backendResponse
-          headers = HTTP.responseHeaders backendResponse
+      let status     = HTTP.responseStatus backendResponse
+          headers    = HTTP.responseHeaders backendResponse
           bodyReader = HTTP.responseBody backendResponse
-
       if shouldStreamResponse headers
         then do
           hPutStrLn stderr "[STREAM] Streaming response detected"
-          respond $ responseStream status (filterResponseHeaders headers) $ \write flush -> do
-            let loop = do
-                  chunk <- brRead bodyReader
-                  unless (BS.null chunk) $ do
-                    write (byteString chunk)
-                    flush
-                    loop
-            loop
+          respond $ responseStream status (filterResponseHeaders headers) $
+            \write flush -> do
+              let loop = do
+                    chunk <- brRead bodyReader
+                    unless (BS.null chunk) $ do
+                      write (byteString chunk)
+                      flush
+                      loop
+              loop
         else do
           body <- readFullBody bodyReader
           respond $ responseLBS status (filterResponseHeaders headers) body
+
   case mResult of
-    Just rr -> return rr
+    Just rr -> pure rr
     Nothing -> respond $ responseLBS
       status504
-      [("Content-Type", "text/plain")]
-      "504 Gateway Timeout: upstream did not respond in time"
+      [(hContentType, contentTypePlain)]
+      bodyGatewayTimeout
 
 shouldStreamResponse :: [(HeaderName, BS.ByteString)] -> Bool
-shouldStreamResponse headers =
-  isSSE || isChunkedWithoutLength
+shouldStreamResponse headers = isSSE || isChunkedWithoutLength
   where
     isSSE = case lookup "Content-Type" headers of
-      Just ct -> "text/event-stream" `BS.isInfixOf` ct
+      Just ct -> eventStreamContentType `BS.isInfixOf` ct
       Nothing -> False
-
-    isChunkedWithoutLength =
-      hasChunkedEncoding && not hasContentLength
-
+    isChunkedWithoutLength = hasChunkedEncoding && not hasContentLength
     hasChunkedEncoding = case lookup "Transfer-Encoding" headers of
-      Just te -> "chunked" `BS.isInfixOf` te
+      Just te -> chunkedEncoding `BS.isInfixOf` te
       Nothing -> False
-
     hasContentLength = case lookup "Content-Length" headers of
-      Just _ -> True
+      Just _  -> True
       Nothing -> False
 
 readFullBody :: HTTP.BodyReader -> IO LBS.ByteString
@@ -594,45 +640,17 @@ readFullBody bodyReader = LBS.fromChunks <$> go
     go = do
       chunk <- brRead bodyReader
       if BS.null chunk
-        then return []
+        then pure []
         else do
           rest <- go
-          return (chunk : rest)
+          pure (chunk : rest)
 
-filterResponseHeaders :: [(HeaderName, BS.ByteString)] -> [(HeaderName, BS.ByteString)]
-filterResponseHeaders = filter (\(name, _) -> name `notElem` hopByHopHeaders)
-  where
-    hopByHopHeaders =
-      [ "Transfer-Encoding"
-      , "Connection"
-      , "Keep-Alive"
-      ]
+filterResponseHeaders
+  :: [(HeaderName, BS.ByteString)] -> [(HeaderName, BS.ByteString)]
+filterResponseHeaders =
+  filter (\(name, _) -> name `notElem` hopByHopResponseHeaders)
 
--- | Filter headers for regular HTTP (remove hop-by-hop headers)
-filterHeaders :: [(HeaderName, BS.ByteString)] -> [(HeaderName, BS.ByteString)]
-filterHeaders headers = filter (\(name, _) -> name `notElem` hopByHopHeaders) headers
-  where
-    hopByHopHeaders =
-      [ "Connection"
-      , "Keep-Alive"
-      , "Proxy-Authenticate"
-      , "Proxy-Authorization"
-      , "TE"
-      , "Trailers"
-      , "Transfer-Encoding"
-      , "Upgrade"
-      ]
-
--- | Log incoming request
-logRequest :: Request -> IO ()
-logRequest req = do
-  let method' = BS8.unpack (requestMethod req)
-      path = BS8.unpack (rawPathInfo req)
-      query = BS8.unpack (rawQueryString req)
-      host = fromMaybe "unknown" $ lookup "Host" (requestHeaders req)
-
-  putStrLn $ "[→] " ++ method' ++ " " ++ path ++ query ++ " (Host: " ++ BS8.unpack host ++ ")"
-
--- Helper: zipWithM
-zipWithM :: Monad m => (a -> b -> m c) -> [a] -> [b] -> m [c]
-zipWithM f xs ys = sequence (zipWith f xs ys)
+filterRequestHeaders
+  :: [(HeaderName, BS.ByteString)] -> [(HeaderName, BS.ByteString)]
+filterRequestHeaders =
+  filter (\(name, _) -> name `notElem` hopByHopRequestHeaders)

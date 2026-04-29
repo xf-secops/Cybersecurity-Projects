@@ -31,6 +31,7 @@ import Control.Concurrent.STM
   )
 import Data.ByteString (ByteString)
 import qualified Data.ByteString.Char8 as BS8
+import Data.List (intercalate)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
@@ -175,12 +176,7 @@ clientIPKey req = case remoteHost req of
     v6Bytes ha =
       let (a, b, c, d, e, f, g, h) = hostAddress6ToTuple ha
           parts = [a, b, c, d, e, f, g, h]
-      in BS8.pack (joinColons (map (`showHex` "") parts))
-
-    joinColons :: [String] -> String
-    joinColons [] = ""
-    joinColons [x] = x
-    joinColons (x : xs) = x <> ":" <> joinColons xs
+      in BS8.pack (intercalate ":" (map (`showHex` "") parts))
 
 pathClassKey :: Request -> ByteString
 pathClassKey req =

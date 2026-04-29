@@ -494,17 +494,17 @@ extractFeatures FeatureContext{..} req =
   let !headers       = requestHeaders req
       !path          = rawPathInfo req
       !method        = requestMethod req
-      !mAcceptLang   = lookupCI acceptLanguageHeader headers
-      !mUserAgent    = lookupCI userAgentHeader headers
-      !mAcceptEnc    = lookupCI acceptEncodingHeader headers
-      !mReferer      = lookupCI refererHeader headers
-      !mCookie       = lookupCI cookieHeader headers
-      !mSecChUa      = lookupCI secChUaHeader headers
-      !mSecChPlat    = lookupCI secChUaPlatformHeader headers
-      !mSecFetchSite = lookupCI secFetchSiteHeader headers
-      !mSecFetchMode = lookupCI secFetchModeHeader headers
-      !mSecFetchDest = lookupCI secFetchDestHeader headers
-      !mAccept       = lookupCI acceptHeader headers
+      !mAcceptLang   = lookup acceptLanguageHeader headers
+      !mUserAgent    = lookup userAgentHeader headers
+      !mAcceptEnc    = lookup acceptEncodingHeader headers
+      !mReferer      = lookup refererHeader headers
+      !mCookie       = lookup cookieHeader headers
+      !mSecChUa      = lookup secChUaHeader headers
+      !mSecChPlat    = lookup secChUaPlatformHeader headers
+      !mSecFetchSite = lookup secFetchSiteHeader headers
+      !mSecFetchMode = lookup secFetchModeHeader headers
+      !mSecFetchDest = lookup secFetchDestHeader headers
+      !mAccept       = lookup acceptHeader headers
       !uaBytes       = fromMaybe BS.empty mUserAgent
       !uaLen         = BS.length uaBytes
       !depth         = pathDepth path
@@ -552,8 +552,3 @@ extractFeatures FeatureContext{..} req =
        , fHeaderOrderCanonical    = boolToDouble
                                       (headerOrderIsCanonicalBrowser headers)
        }
-
-lookupCI :: CI ByteString -> [(CI ByteString, ByteString)] -> Maybe ByteString
-lookupCI k hs = case filter ((== k) . fst) hs of
-  ((_, v) : _) -> Just v
-  _            -> Nothing

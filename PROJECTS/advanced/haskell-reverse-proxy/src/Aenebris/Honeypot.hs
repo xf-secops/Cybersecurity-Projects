@@ -47,7 +47,7 @@ import qualified Data.Text.Encoding as TE
 import Data.Time.Clock.POSIX (POSIXTime, getPOSIXTime)
 import Data.Word (Word64)
 import GHC.Generics (Generic)
-import Network.HTTP.Types (Status, mkStatus)
+import Network.HTTP.Types (status200, status404)
 import Network.Wai
   ( Middleware
   , Response
@@ -218,12 +218,6 @@ isLabyrinthPath = BS.isPrefixOf defaultLabyrinthPrefix
 trapLabel :: TrapPattern -> ByteString
 trapLabel (TrapExact e) = e
 trapLabel (TrapPrefix p) = p <> "*"
-
-status404 :: Status
-status404 = mkStatus 404 "Not Found"
-
-status200 :: Status
-status200 = mkStatus 200 "OK"
 
 honeypotMiddleware :: HoneypotConfig -> Maybe IPJail -> Middleware
 honeypotMiddleware cfg@HoneypotConfig{..} mJail app req respond

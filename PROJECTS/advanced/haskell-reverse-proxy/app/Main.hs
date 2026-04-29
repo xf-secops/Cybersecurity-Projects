@@ -1,3 +1,7 @@
+{-
+©AngelaMos | 2026
+Main.hs
+-}
 {-# LANGUAGE OverloadedStrings #-}
 
 module Main (main) where
@@ -19,43 +23,38 @@ import System.Environment (getArgs)
 import System.Exit (exitFailure)
 import System.IO (hPutStrLn, stderr)
 
+defaultConfigPath :: FilePath
+defaultConfigPath = "config.yaml"
+
 main :: IO ()
 main = do
   args <- getArgs
-
-  -- Get config file path from args or use default
   let configPath = case args of
         (path:_) -> path
-        [] -> "config.yaml"
+        []       -> defaultConfigPath
 
   putStrLn $ "Loading configuration from: " ++ configPath
 
   result <- loadConfig configPath
   case result of
     Left err -> do
-      hPutStrLn stderr $ "ERROR: Failed to load configuration"
+      hPutStrLn stderr "ERROR: Failed to load configuration"
       hPutStrLn stderr err
       exitFailure
 
-    Right config -> do
-      case validateConfig config of
-        Left err -> do
-          hPutStrLn stderr $ "ERROR: Invalid configuration"
-          hPutStrLn stderr err
-          exitFailure
+    Right config -> case validateConfig config of
+      Left err -> do
+        hPutStrLn stderr "ERROR: Invalid configuration"
+        hPutStrLn stderr err
+        exitFailure
 
-        Right () -> do
-          putStrLn "Configuration loaded and validated successfully"
-
-          let upstreamMicros = tcUpstreamReadSeconds defaultTimeoutConfig
-                             * microsPerSecond
-              managerSettings = defaultManagerSettings
-                { managerResponseTimeout = responseTimeoutMicro upstreamMicros
-                }
-          manager <- newManager managerSettings
-
-          -- Initialize proxy state (load balancers + health checkers)
-          proxyState <- initProxyState config manager
-
-          -- Start the proxy
-          startProxy proxyState
+      Right () -> do
+        putStrLn "Configuration loaded and validated successfully"
+        let upstreamMicros = tcUpstreamReadSeconds defaultTimeoutConfig
+                           * microsPerSecond
+            managerSettings = defaultManagerSettings
+              { managerResponseTimeout = responseTimeoutMicro upstreamMicros
+              }
+        manager    <- newManager managerSettings
+        proxyState <- initProxyState config manager
+        startProxy proxyState
