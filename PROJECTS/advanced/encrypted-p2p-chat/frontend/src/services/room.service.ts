@@ -1,7 +1,7 @@
-/**
- * ©AngelaMos | 2025
- * room.service.ts
- */
+// ===================
+// © AngelaMos | 2026
+// room.service.ts
+// ===================
 
 import {
   cryptoService,
@@ -19,9 +19,9 @@ import {
 } from '../stores'
 import type { Message, Room } from '../types'
 
-export async function loadRooms(userId: string): Promise<Room[]> {
+export async function loadRooms(): Promise<Room[]> {
   try {
-    const response = await api.rooms.list(userId)
+    const response = await api.rooms.list()
     setRooms(response.rooms)
     return response.rooms
   } catch {
@@ -30,13 +30,11 @@ export async function loadRooms(userId: string): Promise<Room[]> {
 }
 
 export async function createRoom(
-  creatorId: string,
   participantId: string,
   roomType: 'direct' | 'group' | 'ephemeral' = 'direct'
 ): Promise<Room | null> {
   try {
     const room = await api.rooms.create({
-      creator_id: creatorId,
       participant_id: participantId,
       room_type: roomType,
     })
@@ -64,7 +62,6 @@ export async function loadMessages(
     const serverMessages = response.messages.reverse()
 
     const newMessages: Message[] = []
-
     const currentUserId = $userId.get()
 
     for (const msg of serverMessages) {
@@ -72,7 +69,7 @@ export async function loadMessages(
         continue
       }
 
-      let content = '[Encrypted - from another session]'
+      let content = '[Sent before this device joined - cannot decrypt]'
       const isOwnMessage = msg.sender_id === currentUserId
 
       if (isOwnMessage) {
@@ -80,7 +77,7 @@ export async function loadMessages(
         if (localCopy) {
           content = localCopy.content
         } else {
-          content = '[Your message - not stored locally]'
+          content = '[Sent from a different device]'
         }
       } else {
         try {
@@ -91,7 +88,7 @@ export async function loadMessages(
             msg.header
           )
         } catch {
-          content = '[Encrypted - from another session]'
+          content = '[Sent before this device joined - cannot decrypt]'
         }
       }
 
@@ -110,10 +107,7 @@ export async function loadMessages(
         updated_at: msg.created_at,
       }
 
-      if (
-        !content.startsWith('[Encrypted') &&
-        !content.startsWith('[Your message')
-      ) {
+      if (!content.startsWith('[Sent')) {
         void saveDecryptedMessage(decryptedMessage)
       }
 

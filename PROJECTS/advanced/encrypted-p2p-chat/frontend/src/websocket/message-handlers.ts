@@ -94,11 +94,19 @@ const errorMessageHandler: MessageHandler<ErrorMessageWS> = (message) => {
 }
 
 const roomCreatedHandler: MessageHandler<RoomCreatedWS> = (message) => {
+  const participants: Room['participants'] = message.participants.map((p) => ({
+    user_id: String(p.user_id ?? ''),
+    username: String(p.username ?? ''),
+    display_name: String(p.display_name ?? ''),
+    role: (p.role as 'owner' | 'admin' | 'member' | undefined) ?? 'member',
+    joined_at: String(p.joined_at ?? ''),
+  }))
+
   const room: Room = {
     id: message.room_id,
     type: message.room_type as 'direct' | 'group' | 'ephemeral',
-    name: message.name,
-    participants: message.participants,
+    name: message.name ?? undefined,
+    participants,
     unread_count: 0,
     is_encrypted: message.is_encrypted,
     created_at: message.created_at,

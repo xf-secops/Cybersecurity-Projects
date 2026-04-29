@@ -1,5 +1,5 @@
 // ===================
-// © AngelaMos | 2025
+// © AngelaMos | 2026
 // double-ratchet.ts
 // ===================
 import type {
@@ -26,8 +26,8 @@ import {
 } from './primitives'
 
 const RATCHET_INFO = new TextEncoder().encode('DoubleRatchet')
-const MESSAGE_KEY_INFO = new TextEncoder().encode('MessageKey')
-const CHAIN_KEY_INFO = new TextEncoder().encode('ChainKey')
+const MESSAGE_KEY_BYTE = new Uint8Array([0x01])
+const CHAIN_KEY_BYTE = new Uint8Array([0x02])
 
 function createSkippedKeyId(
   dhPublicKey: Uint8Array,
@@ -47,13 +47,7 @@ export async function initializeRatchetSender(
   const peerKey = await importX25519PublicKey(peerPublicKey)
   const dhOutput = await x25519DeriveSharedSecret(dhKeyPair.privateKey, peerKey)
 
-  const rootChainInput = concatBytes(sharedKey, dhOutput)
-  const derivedKeys = await hkdfDerive(
-    rootChainInput,
-    new Uint8Array(32),
-    RATCHET_INFO,
-    64
-  )
+  const derivedKeys = await hkdfDerive(dhOutput, sharedKey, RATCHET_INFO, 64)
 
   const rootKey = derivedKeys.slice(0, 32)
   const sendingChainKey = derivedKeys.slice(32, 64)
@@ -99,8 +93,8 @@ async function deriveMessageKey(chainKey: Uint8Array): Promise<{
   messageKey: Uint8Array
   nextChainKey: Uint8Array
 }> {
-  const messageKey = await hmacSha256(chainKey, MESSAGE_KEY_INFO)
-  const nextChainKey = await hmacSha256(chainKey, CHAIN_KEY_INFO)
+  const messageKey = await hmacSha256(chainKey, MESSAGE_KEY_BYTE)
+  const nextChainKey = await hmacSha256(chainKey, CHAIN_KEY_BYTE)
 
   return {
     messageKey: messageKey.slice(0, 32),
@@ -127,14 +121,7 @@ async function performDHRatchet(
     peerKey
   )
 
-  const rootChainInput = concatBytes(state.root_key, dhOutput)
-  const derivedKeys = await hkdfDerive(
-    rootChainInput,
-    new Uint8Array(32),
-    RATCHET_INFO,
-    64
-  )
-
+  const derivedKeys = await hkdfDerive(dhOutput, state.root_key, RATCHET_INFO, 64)
   state.root_key = derivedKeys.slice(0, 32)
   state.receiving_chain_key = derivedKeys.slice(32, 64)
 
@@ -146,14 +133,12 @@ async function performDHRatchet(
     newDHKeyPair.privateKey,
     peerKey
   )
-  const newRootChainInput = concatBytes(state.root_key, newDHOutput)
   const newDerivedKeys = await hkdfDerive(
-    newRootChainInput,
-    new Uint8Array(32),
+    newDHOutput,
+    state.root_key,
     RATCHET_INFO,
     64
   )
-
   state.root_key = newDerivedKeys.slice(0, 32)
   state.sending_chain_key = newDerivedKeys.slice(32, 64)
 }

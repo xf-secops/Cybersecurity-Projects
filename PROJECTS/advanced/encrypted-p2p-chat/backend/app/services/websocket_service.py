@@ -1,9 +1,11 @@
 """
-ⒸAngelaMos | 2025
-WebSocket service for handling real time message routing and processing
+©AngelaMos | 2026
+websocket_service.py
 """
 
 import logging
+import time
+from collections import defaultdict, deque
 from typing import Any
 from uuid import UUID
 from datetime import UTC, datetime
@@ -11,12 +13,14 @@ from datetime import UTC, datetime
 from fastapi import WebSocket
 
 from app.config import (
+    RATE_LIMIT_WS_MESSAGE,
     WS_MESSAGE_TYPE_ENCRYPTED,
     WS_MESSAGE_TYPE_PRESENCE,
     WS_MESSAGE_TYPE_RECEIPT,
     WS_MESSAGE_TYPE_TYPING,
 )
 from app.core.enums import PresenceStatus
+from app.core.surreal_manager import surreal_db
 from app.core.websocket_manager import connection_manager
 from app.schemas.websocket import (
     EncryptedMessageWS,
@@ -30,6 +34,23 @@ from app.services.presence_service import presence_service
 
 
 logger = logging.getLogger(__name__)
+
+
+_message_timestamps: dict[UUID, deque[float]] = defaultdict(deque)
+
+
+def _check_message_rate(user_id: UUID) -> bool:
+    """
+    Per-user sliding window of one minute capped by RATE_LIMIT_WS_MESSAGE
+    """
+    now = time.monotonic()
+    window = _message_timestamps[user_id]
+    while window and now - window[0] > 60.0:
+        window.popleft()
+    if len(window) >= RATE_LIMIT_WS_MESSAGE:
+        return False
+    window.append(now)
+    return True
 
 
 class WebSocketService:
@@ -93,6 +114,10 @@ class WebSocketService:
         """
         Process client-encrypted message and forward to recipient (pass-through)
         """
+        if not _check_message_rate(user_id):
+            logger.warning("WS message rate limit hit for %s", user_id)
+            return
+
         try:
             recipient_id = UUID(message.get("recipient_id"))
             room_id = message.get("room_id")
@@ -107,6 +132,21 @@ class WebSocketService:
 
             if not room_id:
                 logger.error("Missing room_id in message from %s", user_id)
+                return
+
+            sender_member = await surreal_db.is_room_participant(
+                room_id, str(user_id)
+            )
+            recipient_member = await surreal_db.is_room_participant(
+                room_id, str(recipient_id)
+            )
+            if not sender_member or not recipient_member:
+                logger.warning(
+                    "Membership check failed: sender=%s recipient=%s room=%s",
+                    user_id,
+                    recipient_id,
+                    room_id,
+                )
                 return
 
             async with async_session_maker() as session:
@@ -195,6 +235,17 @@ class WebSocketService:
                 logger.error(
                     "Missing room_id in typing indicator from %s",
                     user_id
+                )
+                return
+
+            sender_member = await surreal_db.is_room_participant(
+                room_id, str(user_id)
+            )
+            if not sender_member:
+                logger.warning(
+                    "Typing indicator from non-member %s for room %s",
+                    user_id,
+                    room_id,
                 )
                 return
 

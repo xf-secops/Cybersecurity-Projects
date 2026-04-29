@@ -27,7 +27,8 @@ dependencies = [
     "httpx>=0.28.1",
     "orjson>=3.11.4",
     "surrealdb>=1.0.6",
-    "liboqs-python>=0.14.1"
+    "liboqs-python>=0.14.1",
+    "slowapi>=0.1.9",
 ]
 [project.optional-dependencies]
 dev = [

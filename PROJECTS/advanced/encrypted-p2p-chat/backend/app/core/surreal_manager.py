@@ -4,6 +4,7 @@ SurrealDB manager with live queries for real time chat features
 """
 
 import asyncio
+import contextlib
 import logging
 from typing import Any
 from collections.abc import Callable
@@ -265,6 +266,59 @@ class SurrealDBManager:
         """
         result = await self.db.query(query, {"room_id": room_id})
         return self._extract_query_result(result)
+
+    async def is_room_participant(
+        self,
+        room_id: str,
+        user_id: str,
+    ) -> bool:
+        """
+        Check whether a user belongs to a given room
+        """
+        await self.ensure_connected()
+        query = """
+            SELECT * FROM room_participants
+            WHERE (room_id = $room_id OR room_id = type::string($room_id))
+              AND user_id = $user_id
+            LIMIT 1
+        """
+        result = await self.db.query(
+            query,
+            {"room_id": room_id, "user_id": user_id},
+        )
+        rows = self._extract_query_result(result)
+        return len(rows) > 0
+
+    async def get_room(self, room_id: str) -> dict[str, Any] | None:
+        """
+        Look up a room by record id
+        """
+        await self.ensure_connected()
+        try:
+            row = await self.db.select(room_id)
+        except Exception:
+            return None
+        if not row:
+            return None
+        if isinstance(row, list):
+            return row[0] if row else None
+        return row
+
+    async def delete_room(self, room_id: str) -> None:
+        """
+        Delete a room and its messages and participant rows
+        """
+        await self.ensure_connected()
+        await self.db.query(
+            "DELETE messages WHERE room_id = $room_id",
+            {"room_id": room_id},
+        )
+        await self.db.query(
+            "DELETE room_participants WHERE room_id = $room_id",
+            {"room_id": room_id},
+        )
+        with contextlib.suppress(Exception):
+            await self.db.delete(room_id)
 
     async def get_user_rooms(self, user_id: str) -> list[RoomResponse]:
         """

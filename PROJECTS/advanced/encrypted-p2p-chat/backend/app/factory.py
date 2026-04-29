@@ -1,6 +1,6 @@
 """
-ⒸAngelaMos | 2025
-FastAPI application factory
+©AngelaMos | 2026
+factory.py
 """
 
 import logging
@@ -11,26 +11,31 @@ from fastapi import FastAPI
 from fastapi.responses import ORJSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
+from slowapi.errors import RateLimitExceeded
 
+from app.api.auth import limiter as auth_limiter
+from app.api.auth import router as auth_router
+from app.api.encryption import router as encryption_router
+from app.api.rooms import router as rooms_router
+from app.api.websocket import router as websocket_router
+from app.config import (
+    APP_DESCRIPTION,
+    APP_STATUS,
+    APP_VERSION,
+    GZIP_MINIMUM_SIZE,
+    settings,
+)
+from app.core.exception_handlers import (
+    rate_limit_exceeded_handler,
+    register_exception_handlers,
+)
+from app.core.redis_manager import redis_manager
+from app.core.surreal_manager import surreal_db
+from app.models.Base import init_db
 from app.schemas.common import (
     HealthResponse,
     RootResponse,
 )
-from app.config import (
-    settings,
-    APP_VERSION,
-    APP_STATUS,
-    APP_DESCRIPTION,
-    GZIP_MINIMUM_SIZE,
-)
-from app.models.Base import init_db
-from app.api.auth import router as auth_router
-from app.api.rooms import router as rooms_router
-from app.core.surreal_manager import surreal_db
-from app.core.redis_manager import redis_manager
-from app.api.encryption import router as encryption_router
-from app.api.websocket import router as websocket_router
-from app.core.exception_handlers import register_exception_handlers
 
 
 logger = logging.getLogger(__name__)
@@ -74,6 +79,9 @@ def create_app() -> FastAPI:
         default_response_class = ORJSONResponse,
         lifespan = lifespan,
     )
+
+    app.state.limiter = auth_limiter
+    app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
 
     app.add_middleware(
         CORSMiddleware,

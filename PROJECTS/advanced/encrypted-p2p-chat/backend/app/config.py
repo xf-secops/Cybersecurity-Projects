@@ -1,6 +1,6 @@
 """
-ⒸAngelaMos | 2025
-All environment variables and constants are centralized here
+©AngelaMos | 2026
+config.py
 """
 
 from typing import Literal
@@ -24,7 +24,6 @@ USERNAME_MAX_LENGTH = 50
 DISPLAY_NAME_MIN_LENGTH = 1
 DISPLAY_NAME_MAX_LENGTH = 100
 DEVICE_NAME_MAX_LENGTH = 100
-PREKEY_MAX_LENGTH = 500
 
 # User search
 USER_SEARCH_MIN_LENGTH = 2
@@ -54,27 +53,14 @@ WS_MESSAGE_TYPE_PRESENCE = "presence"
 WS_MESSAGE_TYPE_RECEIPT = "receipt"
 WS_MESSAGE_TYPE_ERROR = "error"
 
-# Encryption key field lengths
+# Public key max base64 lengths stored server-side
 IDENTITY_KEY_LENGTH = 64
 SIGNED_PREKEY_LENGTH = 64
 ONE_TIME_PREKEY_LENGTH = 64
 SIGNATURE_LENGTH = 128
-RATCHET_STATE_MAX_LENGTH = 100000
 
-# Encryption constants
-X25519_KEY_SIZE = 32
-ED25519_KEY_SIZE = 32
-ED25519_SIGNATURE_SIZE = 64
-AES_GCM_KEY_SIZE = 32
-AES_GCM_NONCE_SIZE = 12
-HKDF_OUTPUT_SIZE = 32
-
-# Double Ratchet limits
-MAX_SKIP_MESSAGE_KEYS = 1000
-MAX_CACHED_MESSAGE_KEYS = 2000
-DEFAULT_ONE_TIME_PREKEY_COUNT = 100
+# Client signed prekey rotation cadence
 SIGNED_PREKEY_ROTATION_HOURS = 48
-SIGNED_PREKEY_RETENTION_DAYS = 7
 
 # Server defaults
 DEFAULT_HOST = "0.0.0.0"
@@ -83,6 +69,21 @@ DEFAULT_PORT = 8000
 # WebAuthn challenge settings
 WEBAUTHN_CHALLENGE_TTL_SECONDS = 600
 WEBAUTHN_CHALLENGE_BYTES = 32
+
+# Session settings
+SESSION_TTL_SECONDS = 60 * 60 * 24
+SESSION_COOKIE_NAME = "chat_session"
+SESSION_TOKEN_BYTES = 32
+
+# WebAuthn user handle
+WEBAUTHN_USER_HANDLE_BYTES = 64
+
+# Rate limit defaults (used by slowapi)
+RATE_LIMIT_REGISTER_BEGIN = "5/minute"
+RATE_LIMIT_AUTH_BEGIN = "10/minute"
+RATE_LIMIT_AUTH_COMPLETE = "10/minute"
+RATE_LIMIT_USER_SEARCH = "30/minute"
+RATE_LIMIT_WS_MESSAGE = 60
 
 # Application metadata
 APP_VERSION = "1.0.0"

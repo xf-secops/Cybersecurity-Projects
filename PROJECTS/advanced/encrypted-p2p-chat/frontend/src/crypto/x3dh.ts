@@ -32,6 +32,7 @@ import {
 
 const X3DH_INFO = new TextEncoder().encode('X3DH')
 const EMPTY_SALT = new Uint8Array(HKDF_OUTPUT_SIZE)
+const X3DH_F_PREFIX = new Uint8Array(32).fill(0xff)
 
 export async function generateIdentityKeyPair(): Promise<IdentityKeyPair> {
   const x25519KeyPair = await generateX25519KeyPair()
@@ -173,7 +174,7 @@ export async function initiateX3DH(
     dhResults = [dh1, dh2, dh3]
   }
 
-  const concatenated = concatBytes(...dhResults)
+  const concatenated = concatBytes(X3DH_F_PREFIX, ...dhResults)
   const sharedKey = await hkdfDerive(concatenated, EMPTY_SALT, X3DH_INFO, 32)
 
   const senderIdentityPublic = base64ToBytes(identityKeyPair.x25519_public)
@@ -236,7 +237,7 @@ export async function receiveX3DH(
     dhResults = [dh1, dh2, dh3]
   }
 
-  const concatenated = concatBytes(...dhResults)
+  const concatenated = concatBytes(X3DH_F_PREFIX, ...dhResults)
   const sharedKey = await hkdfDerive(concatenated, EMPTY_SALT, X3DH_INFO, 32)
 
   return sharedKey

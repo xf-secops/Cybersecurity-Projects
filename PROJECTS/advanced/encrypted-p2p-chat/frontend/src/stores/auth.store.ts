@@ -1,7 +1,7 @@
-/**
- * Authentication state store
- * Manages current user and authentication status
- */
+// ===================
+// © AngelaMos | 2026
+// auth.store.ts
+// ===================
 
 import { persistentAtom } from '@nanostores/persistent'
 import { atom, computed } from 'nanostores'

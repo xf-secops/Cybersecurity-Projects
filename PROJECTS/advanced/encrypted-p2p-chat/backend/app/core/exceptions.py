@@ -1,6 +1,6 @@
 """
-ⒸAngelaMos | 2025
-Custom application exceptions for clean error handling
+©AngelaMos | 2026
+exceptions.py
 """
 
 
@@ -67,28 +67,4 @@ class AuthenticationError(AppException):
 class InvalidDataError(AppException):
     """
     Raised when input data is invalid
-    """
-
-
-class EncryptionError(AppException):
-    """
-    Raised when message encryption fails
-    """
-
-
-class DecryptionError(AppException):
-    """
-    Raised when message decryption fails
-    """
-
-
-class RatchetStateNotFoundError(AppException):
-    """
-    Raised when ratchet state not found for conversation
-    """
-
-
-class KeyExchangeError(AppException):
-    """
-    Raised when X3DH key exchange fails
     """
