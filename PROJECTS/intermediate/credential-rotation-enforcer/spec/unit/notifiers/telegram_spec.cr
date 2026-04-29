@@ -87,8 +87,7 @@ describe CRE::Notifiers::TelegramSubscriber do
 
     bus = CRE::Engine::EventBus.new
     sub = CRE::Notifiers::TelegramSubscriber.new(
-      bus, CRE::Notifiers::Telegram.new("FAKE"), [1_i64], notify_on_success: false,
-    )
+      bus, CRE::Notifiers::Telegram.new("FAKE"), [1_i64], notify_on_success: false)
     sub.start
     bus.run
     bus.publish CRE::Events::RotationCompleted.new(UUID.random, UUID.random)

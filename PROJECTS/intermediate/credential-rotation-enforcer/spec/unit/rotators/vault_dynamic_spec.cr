@@ -83,7 +83,7 @@ describe CRE::Rotators::VaultDynamicRotator do
   end
 
   it "skips lease revocation when no current_lease_id" do
-    cred = vault_credential  # no current_lease_id
+    cred = vault_credential # no current_lease_id
     WebMock.stub(:get, "http://vault.test/v1/database/creds/myrole")
       .to_return(body: %({"lease_id":"new","lease_duration":3600,"data":{"username":"u","password":"p"}}))
     rotator = CRE::Rotators::VaultDynamicRotator.new(vault_client)

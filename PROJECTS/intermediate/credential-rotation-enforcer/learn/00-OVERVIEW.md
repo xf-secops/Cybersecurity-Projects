@@ -49,7 +49,7 @@ Runtime: under 1 second.
 ### Tier 2 - Docker Compose
 
 ```
-$ make demo-full
+$ just demo-full
 ```
 
 Brings up: PostgreSQL 16, LocalStack (AWS Secrets Manager), HashiCorp Vault dev mode, a fake-GitHub Flask service. CRE connects to all four and rotates one credential through each rotator. Demonstrates real network calls, real auth (SigV4 to LocalStack, token to Vault, bearer to fake-GitHub), real persistence to Postgres, real append-only audit triggers.

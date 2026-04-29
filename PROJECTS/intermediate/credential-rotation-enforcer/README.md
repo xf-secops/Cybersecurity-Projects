@@ -45,7 +45,7 @@ You'll see live narration of an in-memory SQLite + tempfile rotation, with audit
 ### Tier 2 - Full mocked stack (under 2 minutes)
 
 ```bash
-make demo-full
+just demo-full
 ```
 
 Brings up Docker Compose with PostgreSQL 16, LocalStack (AWS Secrets Manager), HashiCorp Vault dev mode, and a fake-GitHub Flask service. CRE talks to all four with real network calls.
@@ -109,7 +109,7 @@ All components are fibers in one OS process. The bus is in-process - Crystal cha
 ```
 credential-rotation-enforcer/
 ├── shard.yml          Crystal manifest (1.20+)
-├── Makefile           build / test / demo / lint targets
+├── justfile           build / test / demo / lint recipes
 ├── policies/          USER policy files (compiled in)
 ├── src/cre/
 │   ├── cli/           subcommand dispatch + 9 commands
@@ -147,7 +147,7 @@ crystal spec                     # all 200+ tests
 crystal spec spec/unit            # unit only (no DB required)
 DATABASE_URL=postgres://cre_test:cre_test@localhost:5432/cre_test \
   crystal spec spec/integration   # integration with real PG
-make check                        # format + lint + unit
+just ci                        # format + lint + unit
 ```
 
 ## License
