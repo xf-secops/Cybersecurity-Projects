@@ -23,12 +23,12 @@ module CRE::Compliance
     }
 
     PCI_DSS = {
-      "rotation.completed"  => ["8.3.9", "8.6.3"],
-      "rotation.failed"     => ["8.3.9", "10.2.1"],
-      "policy.violation"    => ["8.6.3", "10.2.1"],
-      "drift.detected"      => ["10.2.1", "11.5.2"],
-      "audit.batch.sealed"  => ["10.5.2", "10.5.3"],
-      "key.rotation.kek"    => ["3.7.4"],
+      "rotation.completed" => ["8.3.9", "8.6.3"],
+      "rotation.failed"    => ["8.3.9", "10.2.1"],
+      "policy.violation"   => ["8.6.3", "10.2.1"],
+      "drift.detected"     => ["10.2.1", "11.5.2"],
+      "audit.batch.sealed" => ["10.5.2", "10.5.3"],
+      "key.rotation.kek"   => ["3.7.4"],
     }
 
     ISO27001 = {

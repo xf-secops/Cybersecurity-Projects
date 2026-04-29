@@ -105,9 +105,9 @@ module CRE::Compliance
 
     private def build_manifest(entries : Array(FileEntry)) : String
       {
-        "framework"  => @framework,
-        "generated"  => Time.utc.to_rfc3339,
-        "files"      => entries.map { |e|
+        "framework" => @framework,
+        "generated" => Time.utc.to_rfc3339,
+        "files"     => entries.map { |e|
           {"name" => e.name, "sha256" => e.sha256_hex, "size" => e.size}
         },
       }.to_json

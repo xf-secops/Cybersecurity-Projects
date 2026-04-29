@@ -5,6 +5,7 @@
 
 require "../engine/event_bus"
 require "../engine/rotation_orchestrator"
+require "../engine/subscribers/audit_subscriber"
 require "../persistence/sqlite/sqlite_persistence"
 require "../rotators/env_file"
 require "../audit/audit_log"
@@ -51,15 +52,18 @@ module CRE::Demo
       io.puts CRE::Tui::Ansi.bold("Step 3 - Rotating (4-step contract):")
       bus = CRE::Engine::EventBus.new
       ch = bus.subscribe(buffer: 256)
+      audit_sub = CRE::Engine::Subscribers::AuditSubscriber.new(bus, log)
+      audit_sub.start
       bus.run
 
       rotator = CRE::Rotators::EnvFileRotator.new
       orchestrator = CRE::Engine::RotationOrchestrator.new(bus, persist)
       state = orchestrator.run(cred, rotator)
 
-      sleep 0.05.seconds
+      sleep 0.15.seconds
       drain_steps(ch, io)
 
+      audit_sub.stop
       bus.stop
 
       io.puts ""
