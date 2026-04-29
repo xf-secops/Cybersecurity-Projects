@@ -4,10 +4,11 @@
 # ===================
 
 require "./cre/version"
+require "./cre/cli/cli"
 
 module CRE
   def self.main(argv : Array(String)) : Int32
-    0
+    Cli.dispatch(argv)
   end
 end
 

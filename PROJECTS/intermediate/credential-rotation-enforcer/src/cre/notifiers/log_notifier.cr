@@ -56,8 +56,8 @@ module CRE::Notifiers
       when Events::AlertRaised
         case ev.severity
         in Events::Severity::Critical then Log.error &.emit("alert", text: ev.message)
-        in Events::Severity::Warn     then Log.warn  &.emit("alert", text: ev.message)
-        in Events::Severity::Info     then Log.info  &.emit("alert", text: ev.message)
+        in Events::Severity::Warn     then Log.warn &.emit("alert", text: ev.message)
+        in Events::Severity::Info     then Log.info &.emit("alert", text: ev.message)
         end
       end
     end

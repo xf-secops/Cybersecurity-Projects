@@ -12,7 +12,7 @@ module CRE::Notifiers
   # directly with HTTP::Client; no tourmaline dependency for the notification
   # path keeps the footprint small.
   class Telegram
-    Log = ::Log.for("cre.telegram")
+    Log         = ::Log.for("cre.telegram")
     DEFAULT_API = "https://api.telegram.org"
 
     class TelegramError < Exception

@@ -63,13 +63,13 @@ module CRE::Notifiers
       return "unauthorized" unless authorized_viewer?(chat_id)
       cmd, _, rest = text.strip.lstrip('/').partition(' ')
       case cmd
-      when "status" then status_message
-      when "queue"  then queue_message
-      when "alerts" then alerts_message
+      when "status"   then status_message
+      when "queue"    then queue_message
+      when "alerts"   then alerts_message
       when "help", "" then help_message
-      when "rotate" then handle_rotate(chat_id, rest)
-      when "snooze" then handle_snooze(chat_id, rest)
-      when "history" then history_message(rest)
+      when "rotate"   then handle_rotate(chat_id, rest)
+      when "snooze"   then handle_snooze(chat_id, rest)
+      when "history"  then history_message(rest)
       else
         "unknown command: /#{cmd} (try /help)"
       end

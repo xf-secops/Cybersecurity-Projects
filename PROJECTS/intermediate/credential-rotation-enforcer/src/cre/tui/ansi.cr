@@ -17,8 +17,8 @@ module CRE::Tui
     HOME         = "#{ESC}H"
     RESET        = "#{ESC}0m"
 
-    BOLD     = "#{ESC}1m"
-    DIM      = "#{ESC}2m"
+    BOLD = "#{ESC}1m"
+    DIM  = "#{ESC}2m"
 
     FG_RED    = "#{ESC}31m"
     FG_GREEN  = "#{ESC}32m"
@@ -36,13 +36,33 @@ module CRE::Tui
       "#{color}#{text}#{RESET}"
     end
 
-    def self.green(text : String) : String   ; colorize(text, FG_GREEN)  ; end
-    def self.red(text : String) : String     ; colorize(text, FG_RED)    ; end
-    def self.yellow(text : String) : String  ; colorize(text, FG_YELLOW) ; end
-    def self.cyan(text : String) : String    ; colorize(text, FG_CYAN)   ; end
-    def self.gray(text : String) : String    ; colorize(text, FG_GRAY)   ; end
-    def self.bold(text : String) : String    ; colorize(text, BOLD)      ; end
-    def self.dim(text : String) : String     ; colorize(text, DIM)       ; end
+    def self.green(text : String) : String
+      colorize(text, FG_GREEN)
+    end
+
+    def self.red(text : String) : String
+      colorize(text, FG_RED)
+    end
+
+    def self.yellow(text : String) : String
+      colorize(text, FG_YELLOW)
+    end
+
+    def self.cyan(text : String) : String
+      colorize(text, FG_CYAN)
+    end
+
+    def self.gray(text : String) : String
+      colorize(text, FG_GRAY)
+    end
+
+    def self.bold(text : String) : String
+      colorize(text, BOLD)
+    end
+
+    def self.dim(text : String) : String
+      colorize(text, DIM)
+    end
 
     # Strip ANSI escape sequences (useful for testing rendered output).
     def self.strip(text : String) : String

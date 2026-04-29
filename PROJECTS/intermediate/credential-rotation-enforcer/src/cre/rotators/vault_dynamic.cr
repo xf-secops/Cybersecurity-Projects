@@ -43,10 +43,10 @@ module CRE::Rotators
       Domain::NewSecret.new(
         ciphertext: payload.to_slice,
         metadata: {
-          "lease_id"            => ds.lease_id,
-          "lease_duration"      => ds.lease_duration.to_s,
-          "old_lease_id"        => c.tag("current_lease_id") || "",
-          "username"            => ds.username,
+          "lease_id"       => ds.lease_id,
+          "lease_duration" => ds.lease_duration.to_s,
+          "old_lease_id"   => c.tag("current_lease_id") || "",
+          "username"       => ds.username,
         },
       )
     end
