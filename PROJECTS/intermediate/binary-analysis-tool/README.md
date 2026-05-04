@@ -6,7 +6,6 @@
 ██║  ██║██╔╝ ██╗╚██████╔╝██║ ╚═╝ ██║╚██████╔╝██║  ██║   ██║   ███████╗██║ ╚═╝ ██║
 ╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝ ╚═╝     ╚═╝ ╚═════╝ ╚═╝  ╚═╝   ╚═╝   ╚══════╝╚═╝     ╚═╝
 ```
-#### >>> [Live Demo](axumortem.carterperez-dev.com)
 
 [![Cybersecurity Projects](https://img.shields.io/badge/Cybersecurity--Projects-Project%20%2320-red?style=flat&logo=github)](https://github.com/CarterPerez-dev/Cybersecurity-Projects/tree/main/PROJECTS/intermediate/binary-analysis-tool)
 [![Rust](https://img.shields.io/badge/Rust-stable-000000?style=flat&logo=rust&logoColor=white)](https://www.rust-lang.org)
@@ -14,6 +13,7 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?style=flat&logo=typescript&logoColor=white)](https://www.typescriptlang.org)
 [![License: AGPLv3](https://img.shields.io/badge/License-AGPL_v3-purple.svg)](https://www.gnu.org/licenses/agpl-3.0)
 [![Docker](https://img.shields.io/badge/Docker-ready-2496ED?style=flat&logo=docker)](https://www.docker.com)
+[![Live Demo](https://img.shields.io/badge/Live-axumortem.carterperez--dev.com-darkgreen?style=flat&logo=googlechrome)](https://axumortem.carterperez-dev.com)
 
 > Static binary analysis engine with multi-format parsing, YARA scanning, x86 disassembly, and MITRE ATT&CK threat scoring.
 
