@@ -30,6 +30,14 @@ func TestBuild_RegistersSlowRedirect(t *testing.T) {
 	require.Equal(t, token.TypeSlowRedirect, g.Type())
 }
 
+func TestBuild_RegistersDocx(t *testing.T) {
+	reg := registry.Build(registry.Config{BaseURL: testBaseURL})
+	g, ok := reg[token.TypeDocx]
+	require.True(t, ok, "expected docx generator registered")
+	require.NotNil(t, g)
+	require.Equal(t, token.TypeDocx, g.Type())
+}
+
 func TestBuild_UnknownTypeReturnsZeroValue(t *testing.T) {
 	reg := registry.Build(registry.Config{BaseURL: testBaseURL})
 	g, ok := reg["nonexistent-type"]
@@ -40,7 +48,6 @@ func TestBuild_UnknownTypeReturnsZeroValue(t *testing.T) {
 func TestBuild_PendingTypesNotYetRegistered(t *testing.T) {
 	reg := registry.Build(registry.Config{BaseURL: testBaseURL})
 	pending := []token.Type{
-		token.TypeDocx,
 		token.TypePDF,
 		token.TypeKubeconfig,
 		token.TypeEnvfile,
@@ -57,12 +64,12 @@ func TestBuild_PendingTypesNotYetRegistered(t *testing.T) {
 	}
 }
 
-func TestBuild_OnlyExpectedTypesPresentInPhase3(t *testing.T) {
+func TestBuild_OnlyExpectedTypesPresentInPhase4(t *testing.T) {
 	reg := registry.Build(registry.Config{BaseURL: testBaseURL})
 	require.Len(
 		t,
 		reg,
-		2,
-		"Phase 3 registers exactly two generators (webbug, slowredirect); other phases append",
+		3,
+		"Phase 4 registers exactly three generators (webbug, slowredirect, docx); other phases append",
 	)
 }

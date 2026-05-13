@@ -6,6 +6,7 @@ package registry
 import (
 	"github.com/CarterPerez-dev/cybersecurity-projects/canary-token-generator/backend/internal/token"
 	"github.com/CarterPerez-dev/cybersecurity-projects/canary-token-generator/backend/internal/token/generators"
+	"github.com/CarterPerez-dev/cybersecurity-projects/canary-token-generator/backend/internal/token/generators/docx"
 	"github.com/CarterPerez-dev/cybersecurity-projects/canary-token-generator/backend/internal/token/generators/slowredirect"
 	"github.com/CarterPerez-dev/cybersecurity-projects/canary-token-generator/backend/internal/token/generators/webbug"
 )
@@ -20,5 +21,6 @@ func Build(_ Config) Registry {
 	return Registry{
 		token.TypeWebbug:       webbug.New(),
 		token.TypeSlowRedirect: slowredirect.New(),
+		token.TypeDocx:         docx.New(),
 	}
 }
