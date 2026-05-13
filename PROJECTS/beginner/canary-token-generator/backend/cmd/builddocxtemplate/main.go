@@ -98,16 +98,25 @@ func main() {
 	fmt.Printf("wrote %s\n", *out)
 }
 
-func buildTemplate(out string) error {
-	if err := os.MkdirAll(filepath.Dir(out), dirPerm); err != nil {
-		return fmt.Errorf("mkdir parent: %w", err)
+func buildTemplate(out string) (err error) {
+	cleaned := filepath.Clean(out)
+	if mkErr := os.MkdirAll(filepath.Dir(cleaned), dirPerm); mkErr != nil {
+		return fmt.Errorf("mkdir parent: %w", mkErr)
 	}
 
-	f, err := os.OpenFile(out, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, filePerm)
-	if err != nil {
-		return fmt.Errorf("open output: %w", err)
+	f, oErr := os.OpenFile(
+		cleaned,
+		os.O_CREATE|os.O_TRUNC|os.O_WRONLY,
+		filePerm,
+	)
+	if oErr != nil {
+		return fmt.Errorf("open output: %w", oErr)
 	}
-	defer f.Close()
+	defer func() {
+		if cerr := f.Close(); cerr != nil && err == nil {
+			err = fmt.Errorf("close output: %w", cerr)
+		}
+	}()
 
 	w := zip.NewWriter(f)
 	for _, e := range entries() {
@@ -120,8 +129,8 @@ func buildTemplate(out string) error {
 			return fmt.Errorf("write %s: %w", e.name, wErr)
 		}
 	}
-	if err := w.Close(); err != nil {
-		return fmt.Errorf("close zip writer: %w", err)
+	if zErr := w.Close(); zErr != nil {
+		return fmt.Errorf("close zip writer: %w", zErr)
 	}
 	return nil
 }
