@@ -73,8 +73,6 @@ linters:
       excludes:
         - G104
         - G706
-        - G107
-        - G704
 
     sloglint:
       no-mixed-args: true
@@ -91,6 +89,22 @@ linters:
           - funlen
           - dupl
           - goconst
+      - path: internal/notify/telegram/sender\.go
+        linters:
+          - gosec
+        text: "G107|G704"
+      - path: internal/notify/webhook/sender\.go
+        linters:
+          - gosec
+        text: "G107|G704"
+      - path: internal/turnstile/verifier\.go
+        linters:
+          - gosec
+        text: "G107|G704"
+      - path: internal/config/config\.go
+        linters:
+          - gosec
+        text: "G101"
 
 issues:
   max-same-issues: 50
