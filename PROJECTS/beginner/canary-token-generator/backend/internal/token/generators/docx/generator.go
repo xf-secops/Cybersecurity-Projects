@@ -10,23 +10,20 @@ import (
 	_ "embed"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"strings"
 
 	"github.com/CarterPerez-dev/cybersecurity-projects/canary-token-generator/backend/internal/event"
+	"github.com/CarterPerez-dev/cybersecurity-projects/canary-token-generator/backend/internal/middleware"
 	"github.com/CarterPerez-dev/cybersecurity-projects/canary-token-generator/backend/internal/token"
 	"github.com/CarterPerez-dev/cybersecurity-projects/canary-token-generator/backend/internal/token/generators"
 	"github.com/CarterPerez-dev/cybersecurity-projects/canary-token-generator/backend/internal/token/generators/pixel"
 )
 
 const (
-	headerCFConnectingIP = "CF-Connecting-IP"
-	headerXForwardedFor  = "X-Forwarded-For"
-	headerXRealIP        = "X-Real-IP"
-	headerReferer        = "Referer"
-	headerCacheControl   = "Cache-Control"
-	headerPragma         = "Pragma"
+	headerReferer      = "Referer"
+	headerCacheControl = "Cache-Control"
+	headerPragma       = "Pragma"
 
 	cacheControlNoStore = "no-store, no-cache, must-revalidate, max-age=0"
 	pragmaNoCache       = "no-cache"
@@ -90,9 +87,9 @@ func (g *Generator) Trigger(
 
 	evt := &event.Event{
 		TokenID:   t.ID,
-		SourceIP:  realIP(r),
-		UserAgent: optionalHeader(r.UserAgent()),
-		Referer:   optionalHeader(r.Header.Get(headerReferer)),
+		SourceIP:  middleware.RealIP(r),
+		UserAgent: middleware.OptionalHeader(r.UserAgent()),
+		Referer:   middleware.OptionalHeader(r.Header.Get(headerReferer)),
 	}
 	return evt, resp, nil
 }
@@ -152,41 +149,4 @@ func patchTemplate(template []byte, triggerURL string) ([]byte, error) {
 		return nil, fmt.Errorf("docx: close zip writer: %w", err)
 	}
 	return out.Bytes(), nil
-}
-
-func optionalHeader(v string) *string {
-	v = strings.TrimSpace(v)
-	if v == "" {
-		return nil
-	}
-	return &v
-}
-
-func realIP(r *http.Request) string {
-	if v := strings.TrimSpace(r.Header.Get(headerCFConnectingIP)); v != "" {
-		return v
-	}
-	if v := lastNonEmptyXFF(r.Header.Get(headerXForwardedFor)); v != "" {
-		return v
-	}
-	if v := strings.TrimSpace(r.Header.Get(headerXRealIP)); v != "" {
-		return v
-	}
-	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
-		return host
-	}
-	return r.RemoteAddr
-}
-
-func lastNonEmptyXFF(header string) string {
-	if header == "" {
-		return ""
-	}
-	parts := strings.Split(header, ",")
-	for i := len(parts) - 1; i >= 0; i-- {
-		if v := strings.TrimSpace(parts[i]); v != "" {
-			return v
-		}
-	}
-	return ""
 }

@@ -16,6 +16,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/CarterPerez-dev/cybersecurity-projects/canary-token-generator/backend/internal/event"
+	"github.com/CarterPerez-dev/cybersecurity-projects/canary-token-generator/backend/internal/middleware"
 )
 
 const (
@@ -73,7 +74,7 @@ func (h *FingerprintHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err := h.attacher.AttachFingerprint(
 		ctx,
 		tokenID,
-		realIP(r),
+		middleware.RealIP(r),
 		json.RawMessage(body),
 		h.window,
 	); err != nil && !errors.Is(err, event.ErrNotFound) {
