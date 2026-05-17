@@ -6,6 +6,8 @@ package event
 import (
 	"encoding/json"
 	"time"
+
+	"github.com/CarterPerez-dev/cybersecurity-projects/canary-token-generator/backend/internal/geoip"
 )
 
 type NotifyStatus string
@@ -40,4 +42,24 @@ type Event struct {
 	Extra        json.RawMessage `db:"extra"         json:"extra"`
 	NotifyStatus NotifyStatus    `db:"notify_status" json:"notify_status"`
 	NotifiedAt   *time.Time      `db:"notified_at"   json:"notified_at"`
+}
+
+func (e *Event) AttachGeoIP(l geoip.Lookup) {
+	e.GeoCountry = nonEmptyPtr(l.Country)
+	e.GeoRegion = nonEmptyPtr(l.Region)
+	e.GeoCity = nonEmptyPtr(l.City)
+	e.GeoASNOrg = nonEmptyPtr(l.ASNOrg)
+	if l.ASN > 0 {
+		asn := l.ASN
+		e.GeoASN = &asn
+		return
+	}
+	e.GeoASN = nil
+}
+
+func nonEmptyPtr(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
 }

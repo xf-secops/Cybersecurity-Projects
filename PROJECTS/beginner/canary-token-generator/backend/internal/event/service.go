@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
+
+	"github.com/CarterPerez-dev/cybersecurity-projects/canary-token-generator/backend/internal/geoip"
 )
 
 const (
@@ -25,6 +27,7 @@ type Service struct {
 	tokens   TokenIncrementer
 	rdb      *redis.Client
 	notifier Notifier
+	geo      geoip.Lookuper
 	dedupTTL time.Duration
 	logger   *slog.Logger
 }
@@ -32,6 +35,7 @@ type Service struct {
 type ServiceConfig struct {
 	DedupTTL time.Duration
 	Logger   *slog.Logger
+	GeoIP    geoip.Lookuper
 }
 
 func NewService(
@@ -52,6 +56,7 @@ func NewService(
 		tokens:   tokens,
 		rdb:      rdb,
 		notifier: notifier,
+		geo:      cfg.GeoIP,
 		dedupTTL: cfg.DedupTTL,
 		logger:   cfg.Logger,
 	}
@@ -66,6 +71,8 @@ func (s *Service) Record(
 	info NotifyInfo,
 	evt *Event,
 ) error {
+	s.enrichGeo(evt)
+
 	if err := s.repo.Insert(ctx, evt); err != nil {
 		return fmt.Errorf("insert event: %w", err)
 	}
@@ -95,6 +102,13 @@ func (s *Service) Record(
 		s.notifier.Notify(info, evt)
 	}
 	return nil
+}
+
+func (s *Service) enrichGeo(evt *Event) {
+	if s.geo == nil || evt == nil || evt.SourceIP == "" {
+		return
+	}
+	evt.AttachGeoIP(s.geo.Lookup(evt.SourceIP))
 }
 
 func (s *Service) dedupGate(

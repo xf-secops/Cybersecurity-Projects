@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/CarterPerez-dev/cybersecurity-projects/canary-token-generator/backend/internal/event"
+	"github.com/CarterPerez-dev/cybersecurity-projects/canary-token-generator/backend/internal/geoip"
 	"github.com/CarterPerez-dev/cybersecurity-projects/canary-token-generator/backend/internal/middleware"
 	"github.com/CarterPerez-dev/cybersecurity-projects/canary-token-generator/backend/internal/notify"
 	"github.com/CarterPerez-dev/cybersecurity-projects/canary-token-generator/backend/internal/testutil"
@@ -554,4 +555,121 @@ func TestIntegration_RetentionLoopPrunes(t *testing.T) {
 
 	cancel()
 	<-done
+}
+
+type stubLookuper struct{ result geoip.Lookup }
+
+func (s stubLookuper) Lookup(string) geoip.Lookup { return s.result }
+
+func TestIntegration_GeoEnrichmentPopulatesColumns(t *testing.T) {
+	t.Parallel()
+	db := sqlx.NewDb(testutil.NewTestDB(t), "pgx")
+	mr, err := miniredis.Run()
+	require.NoError(t, err)
+	t.Cleanup(mr.Close)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = rdb.Close() })
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	tokenRepo := token.NewRepository(db)
+	eventRepo := event.NewRepository(db)
+
+	geo := stubLookuper{result: geoip.Lookup{
+		Country: "US",
+		Region:  "California",
+		City:    "Mountain View",
+		ASN:     15169,
+		ASNOrg:  "Google LLC",
+	}}
+
+	eventSvc := event.NewService(eventRepo, tokenRepo, rdb, nil, event.ServiceConfig{
+		DedupTTL: 15 * time.Minute,
+		Logger:   logger,
+		GeoIP:    geo,
+	})
+
+	tok := &token.Token{
+		ID:           "intggeo00001",
+		ManageID:     "33333333-3333-3333-3333-333333333333",
+		Type:         token.TypeWebbug,
+		Memo:         "geo-test",
+		AlertChannel: token.ChannelTelegram,
+		TelegramBot:  testutil.Ptr("111:AAA"),
+		TelegramChat: testutil.Ptr("12345"),
+		CreatedIP:    "203.0.113.1",
+		CreatedFP:    "fp",
+		Metadata:     json.RawMessage(`{}`),
+		Enabled:      true,
+	}
+	require.NoError(t, tokenRepo.Insert(context.Background(), tok))
+
+	evt := &event.Event{TokenID: tok.ID, SourceIP: "203.0.113.99"}
+	require.NoError(t, eventSvc.Record(context.Background(), tok.NotifyInfo(), evt))
+
+	list, err := eventRepo.ListByToken(context.Background(), tok.ID,
+		event.ListOptions{Limit: 1})
+	require.NoError(t, err)
+	require.Len(t, list.Events, 1)
+
+	row := list.Events[0]
+	require.NotNil(t, row.GeoCountry)
+	require.Equal(t, "US", *row.GeoCountry)
+	require.NotNil(t, row.GeoRegion)
+	require.Equal(t, "California", *row.GeoRegion)
+	require.NotNil(t, row.GeoCity)
+	require.Equal(t, "Mountain View", *row.GeoCity)
+	require.NotNil(t, row.GeoASN)
+	require.Equal(t, 15169, *row.GeoASN)
+	require.NotNil(t, row.GeoASNOrg)
+	require.Equal(t, "Google LLC", *row.GeoASNOrg)
+}
+
+func TestIntegration_GeoEnrichmentLeavesColumnsNullWhenLookupEmpty(t *testing.T) {
+	t.Parallel()
+	db := sqlx.NewDb(testutil.NewTestDB(t), "pgx")
+	mr, err := miniredis.Run()
+	require.NoError(t, err)
+	t.Cleanup(mr.Close)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = rdb.Close() })
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	tokenRepo := token.NewRepository(db)
+	eventRepo := event.NewRepository(db)
+
+	eventSvc := event.NewService(eventRepo, tokenRepo, rdb, nil, event.ServiceConfig{
+		DedupTTL: 15 * time.Minute,
+		Logger:   logger,
+		GeoIP:    geoip.NopService(),
+	})
+
+	tok := &token.Token{
+		ID:           "intggeo00002",
+		ManageID:     "44444444-4444-4444-4444-444444444444",
+		Type:         token.TypeWebbug,
+		Memo:         "geo-nop",
+		AlertChannel: token.ChannelTelegram,
+		TelegramBot:  testutil.Ptr("111:AAA"),
+		TelegramChat: testutil.Ptr("12345"),
+		CreatedIP:    "203.0.113.1",
+		CreatedFP:    "fp",
+		Metadata:     json.RawMessage(`{}`),
+		Enabled:      true,
+	}
+	require.NoError(t, tokenRepo.Insert(context.Background(), tok))
+
+	evt := &event.Event{TokenID: tok.ID, SourceIP: "203.0.113.42"}
+	require.NoError(t, eventSvc.Record(context.Background(), tok.NotifyInfo(), evt))
+
+	list, err := eventRepo.ListByToken(context.Background(), tok.ID,
+		event.ListOptions{Limit: 1})
+	require.NoError(t, err)
+	require.Len(t, list.Events, 1)
+
+	row := list.Events[0]
+	require.Nil(t, row.GeoCountry)
+	require.Nil(t, row.GeoRegion)
+	require.Nil(t, row.GeoCity)
+	require.Nil(t, row.GeoASN)
+	require.Nil(t, row.GeoASNOrg)
 }

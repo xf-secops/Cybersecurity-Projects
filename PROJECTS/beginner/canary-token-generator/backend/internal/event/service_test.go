@@ -18,6 +18,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/CarterPerez-dev/cybersecurity-projects/canary-token-generator/backend/internal/event"
+	"github.com/CarterPerez-dev/cybersecurity-projects/canary-token-generator/backend/internal/geoip"
 )
 
 const testTokenID = "tokevtsvc001"
@@ -116,6 +117,27 @@ func (f *fakeIncrementer) callCount() int {
 	return len(f.calls)
 }
 
+type fakeLookuper struct {
+	mu     sync.Mutex
+	called []string
+	result geoip.Lookup
+}
+
+func (f *fakeLookuper) Lookup(ip string) geoip.Lookup {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.called = append(f.called, ip)
+	return f.result
+}
+
+func (f *fakeLookuper) calls() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]string, len(f.called))
+	copy(out, f.called)
+	return out
+}
+
 type fakeNotifier struct {
 	mu    sync.Mutex
 	calls []notifyCall
@@ -179,6 +201,21 @@ func newSvc(
 	return event.NewService(store, tokens, rdb, notifier, event.ServiceConfig{
 		DedupTTL: 15 * time.Minute,
 		Logger:   slog.New(slog.NewTextHandler(testWriter{t}, nil)),
+	})
+}
+
+func newSvcWithGeo(
+	t *testing.T,
+	store event.Store,
+	tokens event.TokenIncrementer,
+	rdb *redis.Client,
+	geo geoip.Lookuper,
+) *event.Service {
+	t.Helper()
+	return event.NewService(store, tokens, rdb, nil, event.ServiceConfig{
+		DedupTTL: 15 * time.Minute,
+		Logger:   slog.New(slog.NewTextHandler(testWriter{t}, nil)),
+		GeoIP:    geo,
 	})
 }
 
@@ -685,4 +722,100 @@ func TestService_RunRetentionLoop_DisabledOnInvalidConfig(t *testing.T) {
 	}
 
 	require.Equal(t, 0, store.pruneLastLimit)
+}
+
+func TestService_Record_EnrichesGeoBeforeInsert(t *testing.T) {
+	t.Parallel()
+	store := &fakeStore{}
+	inc := &fakeIncrementer{}
+	rdb, _ := setupRedis(t)
+	geo := &fakeLookuper{result: geoip.Lookup{
+		Country: "US", Region: "California", City: "Mountain View",
+		ASN: 15169, ASNOrg: "Google LLC",
+	}}
+	svc := newSvcWithGeo(t, store, inc, rdb, geo)
+
+	evt := sampleEvent("203.0.113.1")
+	require.NoError(t, svc.Record(context.Background(), sampleInfo(), evt))
+
+	require.Equal(t, []string{"203.0.113.1"}, geo.calls(),
+		"Record must invoke Lookup exactly once with the event's source IP")
+
+	inserted, _ := store.snapshot()
+	require.Len(t, inserted, 1)
+	got := inserted[0]
+	require.NotNil(t, got.GeoCountry)
+	require.Equal(t, "US", *got.GeoCountry)
+	require.NotNil(t, got.GeoCity)
+	require.Equal(t, "Mountain View", *got.GeoCity)
+	require.NotNil(t, got.GeoASN)
+	require.Equal(t, 15169, *got.GeoASN)
+}
+
+func TestService_Record_NoGeoConfigured_LeavesGeoNil(t *testing.T) {
+	t.Parallel()
+	store := &fakeStore{}
+	inc := &fakeIncrementer{}
+	rdb, _ := setupRedis(t)
+	svc := newSvc(t, store, inc, rdb, nil)
+
+	evt := sampleEvent("203.0.113.1")
+	require.NoError(t, svc.Record(context.Background(), sampleInfo(), evt))
+
+	inserted, _ := store.snapshot()
+	require.Len(t, inserted, 1)
+	require.Nil(t, inserted[0].GeoCountry)
+	require.Nil(t, inserted[0].GeoCity)
+	require.Nil(t, inserted[0].GeoASN)
+}
+
+func TestService_Record_EmptySourceIP_SkipsLookup(t *testing.T) {
+	t.Parallel()
+	store := &fakeStore{}
+	inc := &fakeIncrementer{}
+	rdb, _ := setupRedis(t)
+	geo := &fakeLookuper{result: geoip.Lookup{Country: "ZZ"}}
+	svc := newSvcWithGeo(t, store, inc, rdb, geo)
+
+	evt := &event.Event{TokenID: testTokenID}
+	require.NoError(t, svc.Record(context.Background(), sampleInfo(), evt))
+
+	require.Empty(t, geo.calls(),
+		"empty source IP must short-circuit the geo lookup "+
+			"(no useful enrichment possible)")
+	inserted, _ := store.snapshot()
+	require.Nil(t, inserted[0].GeoCountry)
+}
+
+func TestService_Record_NopLookuper_LeavesGeoNil(t *testing.T) {
+	t.Parallel()
+	store := &fakeStore{}
+	inc := &fakeIncrementer{}
+	rdb, _ := setupRedis(t)
+	svc := newSvcWithGeo(t, store, inc, rdb, geoip.NopService())
+
+	evt := sampleEvent("203.0.113.1")
+	require.NoError(t, svc.Record(context.Background(), sampleInfo(), evt))
+
+	inserted, _ := store.snapshot()
+	require.Nil(t, inserted[0].GeoCountry,
+		"NopService returns empty Lookup; AttachGeoIP leaves all fields nil")
+}
+
+func TestService_Record_GeoEnrichmentBestEffort_InsertErrorBubbles(
+	t *testing.T,
+) {
+	t.Parallel()
+	store := &fakeStore{insertErr: errors.New("db down")}
+	inc := &fakeIncrementer{}
+	rdb, _ := setupRedis(t)
+	geo := &fakeLookuper{result: geoip.Lookup{Country: "US"}}
+	svc := newSvcWithGeo(t, store, inc, rdb, geo)
+
+	err := svc.Record(context.Background(), sampleInfo(),
+		sampleEvent("203.0.113.1"))
+	require.Error(t, err, "insert error path is unchanged by geo enrichment")
+	require.Equal(t, []string{"203.0.113.1"}, geo.calls(),
+		"enrichment runs even when insert later fails "+
+			"(no upstream side-effect)")
 }
