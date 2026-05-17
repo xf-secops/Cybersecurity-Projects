@@ -3,7 +3,7 @@
 // artifact.tsx
 // ===================
 
-import { useMemo } from 'react'
+import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import type { Artifact } from '@/api'
 import { CopyField, Pill } from '@/components'
@@ -63,16 +63,7 @@ function FileArtifact({
 }): React.ReactElement {
   const filename = artifact.filename ?? filenameFallback
   const contentType = artifact.content_type ?? 'application/octet-stream'
-  const href = useMemo(() => {
-    if (!artifact.content_b64) {
-      return null
-    }
-    try {
-      return base64ToObjectUrl(artifact.content_b64, contentType)
-    } catch (_err) {
-      return null
-    }
-  }, [artifact.content_b64, contentType])
+  const href = useBase64ObjectUrl(artifact.content_b64, contentType)
 
   if (!href) {
     return <Pill tone="alarm">artifact unreadable</Pill>
@@ -109,13 +100,7 @@ function TextArtifact({
   const filename = artifact.filename ?? filenameFallback
   const content = artifact.content ?? ''
   const contentType = artifact.content_type ?? 'text/plain'
-  const href = useMemo(() => {
-    if (content.length === 0) {
-      return null
-    }
-    const blob = new Blob([content], { type: contentType })
-    return URL.createObjectURL(blob)
-  }, [content, contentType])
+  const href = useTextObjectUrl(content, contentType)
 
   return (
     <div className={styles.artifactStack}>
@@ -152,12 +137,57 @@ function ConnectionStringArtifact({
   )
 }
 
-function base64ToObjectUrl(b64: string, contentType: string): string {
+function useBase64ObjectUrl(
+  b64: string | undefined,
+  contentType: string
+): string | null {
+  const [url, setUrl] = useState<string | null>(null)
+  useEffect(() => {
+    if (!b64 || b64.length === 0) {
+      setUrl(null)
+      return
+    }
+    let created: string | null = null
+    try {
+      const bytes = base64ToBytes(b64)
+      const blob = new Blob([bytes], { type: contentType })
+      created = URL.createObjectURL(blob)
+      setUrl(created)
+    } catch (_err) {
+      setUrl(null)
+    }
+    return () => {
+      if (created !== null) {
+        URL.revokeObjectURL(created)
+      }
+    }
+  }, [b64, contentType])
+  return url
+}
+
+function useTextObjectUrl(content: string, contentType: string): string | null {
+  const [url, setUrl] = useState<string | null>(null)
+  useEffect(() => {
+    if (content.length === 0) {
+      setUrl(null)
+      return
+    }
+    const blob = new Blob([content], { type: contentType })
+    const next = URL.createObjectURL(blob)
+    setUrl(next)
+    return () => {
+      URL.revokeObjectURL(next)
+    }
+  }, [content, contentType])
+  return url
+}
+
+function base64ToBytes(b64: string): Uint8Array<ArrayBuffer> {
   const binary = atob(b64)
   const len = binary.length
   const bytes = new Uint8Array(len)
   for (let i = 0; i < len; i += 1) {
     bytes[i] = binary.charCodeAt(i)
   }
-  return URL.createObjectURL(new Blob([bytes], { type: contentType }))
+  return bytes
 }

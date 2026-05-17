@@ -52,8 +52,6 @@ function renderGlyph(type: TokenType): React.ReactElement {
       return <EnvfileGlyph />
     case 'mysql':
       return <MysqlGlyph />
-    default:
-      return <WebbugGlyph />
   }
 }
 

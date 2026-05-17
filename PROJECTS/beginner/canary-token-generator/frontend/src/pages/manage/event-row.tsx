@@ -3,7 +3,7 @@
 // event-row.tsx
 // ===================
 
-import type { EventResponse, GeoView } from '@/api'
+import type { EventExtra, EventResponse, GeoView } from '@/api'
 import { Pill } from '@/components'
 import { NOTIFY_TONE } from './copy'
 import styles from './manage.module.scss'
@@ -115,8 +115,6 @@ function formatGeo(geo: GeoView): string {
   return parts.join(' · ')
 }
 
-function hasExtraDetails(extra: unknown): boolean {
-  if (extra == null) return false
-  if (typeof extra !== 'object') return false
-  return Object.keys(extra as Record<string, unknown>).length > 0
+function hasExtraDetails(extra: EventExtra): boolean {
+  return Object.keys(extra).length > 0
 }

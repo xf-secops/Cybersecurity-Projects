@@ -14,10 +14,16 @@ import {
   useCreateToken,
   useTokenTypes,
 } from '@/api'
-import { Button, Halftone, Strip, StripItem } from '@/components'
+import {
+  Button,
+  Halftone,
+  Strip,
+  StripItem,
+  TextareaField,
+  TextField,
+} from '@/components'
 import { getTurnstileSiteKey, Turnstile } from '@/core/turnstile'
-import { ArtifactDisplay } from './artifact'
-import { PAGE_COPY, TOKEN_BLURB } from './copy'
+import { PAGE_COPY } from './copy'
 import {
   buildSubmissionState,
   FILE_KIND_TYPES,
@@ -224,22 +230,17 @@ function AnnotateSection({
       title={PAGE_COPY.SECTION_02_TITLE}
       body={PAGE_COPY.SECTION_02_BODY}
     >
-      <div className={styles.fieldRow}>
-        <FieldLabel index="A">MEMO</FieldLabel>
-        <textarea
-          className={styles.textarea}
-          value={form.memo}
-          maxLength={256}
-          placeholder="Q4 bonuses spreadsheet on file-server"
-          onChange={(e) => onChange({ memo: e.target.value })}
-          data-invalid={errors.memo !== undefined}
-        />
-        {errors.memo ? (
-          <p className={styles.fieldError}>{errors.memo}</p>
-        ) : (
-          <p className={styles.fieldHint}>{form.memo.length} / 256 characters</p>
-        )}
-      </div>
+      <TextareaField
+        index="A"
+        label="MEMO"
+        name="memo"
+        value={form.memo}
+        maxLength={256}
+        placeholder="Q4 bonuses spreadsheet on file-server"
+        onChange={(e) => onChange({ memo: e.target.value })}
+        error={errors.memo}
+        hint={`${form.memo.length} / 256 characters`}
+      />
       {showFilename ? (
         <FilenameField form={form} errors={errors} onChange={onChange} />
       ) : null}
@@ -253,24 +254,17 @@ function FilenameField({
   onChange,
 }: SectionPropsBase): React.ReactElement {
   return (
-    <div className={styles.fieldRow}>
-      <FieldLabel index="B">FILENAME (OPTIONAL)</FieldLabel>
-      <input
-        className={styles.input}
-        value={form.filename}
-        maxLength={128}
-        placeholder={defaultFilename(form.type)}
-        onChange={(e) => onChange({ filename: e.target.value })}
-        data-invalid={errors.filename !== undefined}
-      />
-      {errors.filename ? (
-        <p className={styles.fieldError}>{errors.filename}</p>
-      ) : (
-        <p className={styles.fieldHint}>
-          What the bait file will be called when it lands somewhere it shouldn't.
-        </p>
-      )}
-    </div>
+    <TextField
+      index="B"
+      label="FILENAME (OPTIONAL)"
+      name="filename"
+      value={form.filename}
+      maxLength={128}
+      placeholder={defaultFilename(form.type)}
+      onChange={(e) => onChange({ filename: e.target.value })}
+      error={errors.filename}
+      hint="What the bait file will be called when it lands somewhere it shouldn't."
+    />
   )
 }
 
@@ -305,32 +299,24 @@ function TelegramFields({
 }: SectionPropsBase): React.ReactElement {
   return (
     <div className={styles.subgrid}>
-      <div className={styles.fieldRow}>
-        <FieldLabel index="A">BOT TOKEN</FieldLabel>
-        <input
-          className={styles.input}
-          value={form.telegramBot}
-          placeholder="123456789:ABCdefGHIjklMNO..."
-          onChange={(e) => onChange({ telegramBot: e.target.value })}
-          data-invalid={errors.telegram_bot !== undefined}
-        />
-        {errors.telegram_bot ? (
-          <p className={styles.fieldError}>{errors.telegram_bot}</p>
-        ) : null}
-      </div>
-      <div className={styles.fieldRow}>
-        <FieldLabel index="B">CHAT ID</FieldLabel>
-        <input
-          className={styles.input}
-          value={form.telegramChat}
-          placeholder="-1001234567890"
-          onChange={(e) => onChange({ telegramChat: e.target.value })}
-          data-invalid={errors.telegram_chat !== undefined}
-        />
-        {errors.telegram_chat ? (
-          <p className={styles.fieldError}>{errors.telegram_chat}</p>
-        ) : null}
-      </div>
+      <TextField
+        index="A"
+        label="BOT TOKEN"
+        name="telegram_bot"
+        value={form.telegramBot}
+        placeholder="123456789:ABCdefGHIjklMNO..."
+        onChange={(e) => onChange({ telegramBot: e.target.value })}
+        error={errors.telegram_bot}
+      />
+      <TextField
+        index="B"
+        label="CHAT ID"
+        name="telegram_chat"
+        value={form.telegramChat}
+        placeholder="-1001234567890"
+        onChange={(e) => onChange({ telegramChat: e.target.value })}
+        error={errors.telegram_chat}
+      />
     </div>
   )
 }
@@ -341,25 +327,17 @@ function WebhookField({
   onChange,
 }: SectionPropsBase): React.ReactElement {
   return (
-    <div className={styles.fieldRow}>
-      <FieldLabel index="A">WEBHOOK URL</FieldLabel>
-      <input
-        className={styles.input}
-        type="url"
-        value={form.webhookUrl}
-        placeholder="https://hooks.example.com/canary"
-        onChange={(e) => onChange({ webhookUrl: e.target.value })}
-        data-invalid={errors.webhook_url !== undefined}
-      />
-      {errors.webhook_url ? (
-        <p className={styles.fieldError}>{errors.webhook_url}</p>
-      ) : (
-        <p className={styles.fieldHint}>
-          We POST the alert envelope JSON. Optionally HMAC-signed if the server
-          has WEBHOOK_HMAC_SECRET set.
-        </p>
-      )}
-    </div>
+    <TextField
+      index="A"
+      label="WEBHOOK URL"
+      name="webhook_url"
+      type="url"
+      value={form.webhookUrl}
+      placeholder="https://hooks.example.com/canary"
+      onChange={(e) => onChange({ webhookUrl: e.target.value })}
+      error={errors.webhook_url}
+      hint="We POST the alert envelope JSON. Optionally HMAC-signed if the server has WEBHOOK_HMAC_SECRET set."
+    />
   )
 }
 
@@ -395,20 +373,17 @@ function SlowRedirectField({
   errors,
   onChange,
 }: SectionPropsBase): React.ReactElement {
-  const err = errors['metadata.destination_url']
   return (
-    <div className={styles.fieldRow}>
-      <FieldLabel index="A">DESTINATION URL</FieldLabel>
-      <input
-        className={styles.input}
-        type="url"
-        value={form.slowredirectDestination}
-        placeholder="https://example.com/landing"
-        onChange={(e) => onChange({ slowredirectDestination: e.target.value })}
-        data-invalid={err !== undefined}
-      />
-      {err ? <p className={styles.fieldError}>{err}</p> : null}
-    </div>
+    <TextField
+      index="A"
+      label="DESTINATION URL"
+      name="metadata_destination_url"
+      type="url"
+      value={form.slowredirectDestination}
+      placeholder="https://example.com/landing"
+      onChange={(e) => onChange({ slowredirectDestination: e.target.value })}
+      error={errors['metadata.destination_url']}
+    />
   )
 }
 
@@ -466,19 +441,6 @@ function Section({
       <p className={styles.sectionBody}>{body}</p>
       <div className={styles.sectionContent}>{children}</div>
     </section>
-  )
-}
-
-function FieldLabel({
-  index,
-  children,
-}: React.PropsWithChildren<{ index?: string }>): React.ReactElement {
-  return (
-    <div className={styles.fieldLabel}>
-      {index ? <span className={styles.fieldIndex}>{index}</span> : null}
-      <span className={styles.fieldName}>{children}</span>
-      <span className={styles.fieldRule} aria-hidden="true" />
-    </div>
   )
 }
 
@@ -608,6 +570,3 @@ function descriptorTitle(type: TokenType | ''): string {
   }
   return 'CONFIG'
 }
-
-export { TOKEN_BLURB }
-export { ArtifactDisplay }

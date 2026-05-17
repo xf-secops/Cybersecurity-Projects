@@ -110,7 +110,7 @@ function ManageView({
 
       <EventLogSection
         events={events}
-        cursor={cursor}
+        cursorIsSet={cursor !== undefined}
         hasMore={page.has_more}
         isFetchingNextPage={isFetchingNextPage}
         onLoadOlder={onLoadOlder}
@@ -218,7 +218,7 @@ function DossierCard({
 
 type EventLogSectionProps = {
   events: ManageResponse['events']
-  cursor: string | undefined
+  cursorIsSet: boolean
   hasMore: boolean
   isFetchingNextPage: boolean
   onLoadOlder: () => void
@@ -227,7 +227,7 @@ type EventLogSectionProps = {
 
 function EventLogSection({
   events,
-  cursor,
+  cursorIsSet,
   hasMore,
   isFetchingNextPage,
   onLoadOlder,
@@ -247,16 +247,12 @@ function EventLogSection({
       ) : (
         <div className={styles.eventList}>
           {events.map((event, idx) => (
-            <EventRow
-              key={event.id}
-              event={event}
-              index={cursor === undefined ? idx + 1 : idx + 1}
-            />
+            <EventRow key={event.id} event={event} index={idx + 1} />
           ))}
         </div>
       )}
       <footer className={styles.eventLogFoot}>
-        {cursor !== undefined ? (
+        {cursorIsSet ? (
           <Button variant="ghost" size="sm" onClick={onResetCursor}>
             ← back to most recent
           </Button>

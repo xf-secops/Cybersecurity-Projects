@@ -20,6 +20,10 @@ export const geoViewSchema = z.object({
 
 export type GeoView = z.infer<typeof geoViewSchema>
 
+export const eventExtraSchema = z.record(z.string(), z.unknown())
+
+export type EventExtra = z.infer<typeof eventExtraSchema>
+
 export const eventResponseSchema = z.object({
   id: z.number().int().nonnegative(),
   triggered_at: z.iso.datetime(),
@@ -27,7 +31,7 @@ export const eventResponseSchema = z.object({
   user_agent: z.string().nullable(),
   referer: z.string().nullable(),
   geo: geoViewSchema,
-  extra: z.unknown(),
+  extra: eventExtraSchema,
   notify_status: notifyStatusSchema,
   notified_at: z.iso.datetime().nullable(),
 })

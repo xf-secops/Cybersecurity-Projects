@@ -11,14 +11,15 @@ type SerialBarProps = {
   prefix?: string
 }
 
-const BAR_CHARS = ['▮', '▯', '▮', '▮', '▯', '▮', '▯', '▯', '▮']
+const BAR_COUNT = 22
+const FALLBACK_BARS = '▮▯▮▮▯▮▯▯▮▮▯▮▮▯▮▯▮▮▯▮▯▮'
 
 function fingerprintToBars(value: string): string {
   if (value.length === 0) {
-    return BAR_CHARS.join('')
+    return FALLBACK_BARS
   }
   let acc = ''
-  for (let i = 0; i < 22; i += 1) {
+  for (let i = 0; i < BAR_COUNT; i += 1) {
     const ch = value.charCodeAt(i % value.length)
     acc += (ch & 1) === 0 ? '▮' : '▯'
   }
