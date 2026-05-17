@@ -298,6 +298,7 @@ var envKeyMap = map[string]string{
 	"OTEL_INSECURE":                "otel.insecure",
 	"OTEL_SAMPLE_RATE":             "otel.sample_rate",
 	"CANARY_BASE_URL":              "canary.base_url",
+	"PUBLIC_BASE_URL":              "canary.base_url",
 	"CANARY_MANAGE_URL":            "canary.manage_url",
 	"TURNSTILE_SECRET_KEY":         "turnstile.secret_key",
 	"TURNSTILE_SITE_KEY":           "turnstile.site_key",
