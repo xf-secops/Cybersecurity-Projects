@@ -27,11 +27,18 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
     -o /out/canary \
     ./cmd/canary
 
+RUN CGO_ENABLED=0 GOOS=linux go build \
+    -trimpath \
+    -ldflags="-s -w" \
+    -o /out/healthcheck \
+    ./cmd/healthcheck
+
 FROM gcr.io/distroless/static:nonroot AS final
 
 WORKDIR /
 
 COPY --from=builder /out/canary /canary
+COPY --from=builder /out/healthcheck /healthcheck
 COPY --from=builder /src/config.yaml /config.yaml
 
 EXPOSE 8080
