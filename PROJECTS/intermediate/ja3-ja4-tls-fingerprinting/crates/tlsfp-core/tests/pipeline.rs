@@ -46,6 +46,17 @@ fn client_hellos(events: &[FingerprintEvent]) -> Vec<(&str, &str)> {
         .collect()
 }
 
+/// Returns the ClientHello events whose JA4 transport marker is QUIC.
+fn quic_client_hellos(events: &[FingerprintEvent]) -> Vec<&FingerprintEvent> {
+    events
+        .iter()
+        .filter(|e| match &e.event {
+            StreamEvent::ClientHello { ja4, .. } => ja4.hash.starts_with('q'),
+            _ => false,
+        })
+        .collect()
+}
+
 fn ja4s_hashes(events: &[FingerprintEvent]) -> Vec<(&str, &str)> {
     events
         .iter()
@@ -109,6 +120,46 @@ fn chrome_cloudflare_tcp_handshake_reproduces_published_ja4() {
             .iter()
             .any(|(hash, _)| *hash == "t130200_1301_234ea6891581"),
         "expected the published cloudflare JA4S, saw {servers:?}"
+    );
+}
+
+#[test]
+fn chrome_cloudflare_quic_initial_decrypts_to_published_q_ja4() {
+    // The same capture carries the same browser over both transports. The TCP
+    // ClientHello above and this QUIC one share a JA4_a prefix family but
+    // differ where the transport and ALPN do, which is the whole reason JA4
+    // records the transport. The QUIC value below was reproduced from the
+    // decrypted Initial by an independent decryptor and recomputed from its
+    // raw string with a shell digest before being pinned.
+    let events = fingerprint("chrome-cloudflare-quic-with-secrets.pcapng");
+
+    let quic = quic_client_hellos(&events);
+    assert_eq!(quic.len(), 1, "expected exactly one QUIC ClientHello");
+    let StreamEvent::ClientHello { ja4, sni, alpn, .. } = &quic[0].event else {
+        unreachable!("filtered to ClientHello");
+    };
+    assert_eq!(ja4.hash, "q13d0310h3_55b375c5d22e_cd85d2d88918");
+    assert_eq!(sni.as_deref(), Some("cloudflare-quic.com"));
+    assert_eq!(alpn.as_deref(), Some("h3"));
+}
+
+#[test]
+fn quic_several_tls_frames_reassembles_split_client_hello() {
+    // This capture's ClientHello is delivered across several CRYPTO frames in
+    // one Initial, exercising the offset based reassembler. It lands on the
+    // identical JA4 as the chrome capture despite being a different client,
+    // because JA4 sorts the cipher and extension lists before hashing.
+    let events = fingerprint("quic-with-several-tls-frames.pcapng");
+
+    let quic = quic_client_hellos(&events);
+    assert_eq!(quic.len(), 1);
+    let StreamEvent::ClientHello { ja4, .. } = &quic[0].event else {
+        unreachable!("filtered to ClientHello");
+    };
+    assert_eq!(ja4.hash, "q13d0310h3_55b375c5d22e_cd85d2d88918");
+    assert_eq!(
+        ja4.raw,
+        "q13d0310h3_1301,1302,1303_000a,000d,001b,002b,002d,0033,0039,4469_0403,0804,0401,0503,0805,0501,0806,0601,0201"
     );
 }
 

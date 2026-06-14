@@ -45,6 +45,9 @@ pub enum SourceError {
 
     #[error("malformed capture: {0}")]
     Malformed(String),
+
+    #[error("capture source failed: {0}")]
+    Capture(String),
 }
 
 /// One link layer frame as captured, with the metadata needed to decode it.

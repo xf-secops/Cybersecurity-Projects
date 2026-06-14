@@ -22,12 +22,18 @@ use std::collections::HashMap;
 
 use serde::Serialize;
 
+use crate::ja3::{ja3, ja3_string};
+use crate::ja4::{Transport, ja4};
 use crate::ja4t::ja4t;
-use crate::pipeline::decode::{Skip, decode_frame};
+use crate::parse::parse_client_hello;
+use crate::pipeline::decode::{Decoded, DecodedDatagram, DecodedSegment, Skip, decode_frame};
 use crate::pipeline::event::{FingerprintEvent, StreamEvent};
 use crate::pipeline::flow::{FlowKey, PushOutcome, ReassemblyLimits, StreamReassembler};
 use crate::pipeline::source::{PacketSource, RawFrame, SourceError};
 use crate::pipeline::tls::StreamProtocol;
+use crate::quic::{
+    ClientHelloState, CryptoAssembler, InitialKeys, InitialPacket, walk_crypto_frames,
+};
 
 /// Tuning knobs for the pipeline.
 ///
@@ -85,9 +91,10 @@ pub struct Counters {
     pub frames: u64,
     pub bytes: u64,
     pub tcp_segments: u64,
+    pub udp_datagrams: u64,
     pub skipped_unsupported_link_type: u64,
     pub skipped_not_ip: u64,
-    pub skipped_not_tcp: u64,
+    pub skipped_not_transport: u64,
     pub skipped_malformed: u64,
     pub flows_created: u64,
     pub flows_evicted_idle: u64,
@@ -96,6 +103,14 @@ pub struct Counters {
     pub events: u64,
     pub streams_capped: u64,
     pub unfinished_tls_streams: u64,
+    /// QUIC long header Initial packets observed, both directions.
+    pub quic_initials: u64,
+    /// Client Initials whose protection was removed and payload decrypted.
+    /// The gap to `quic_initials` is mostly server Initials, which a passive
+    /// observer cannot open, and is exactly the honesty an operator needs.
+    pub quic_decrypted: u64,
+    /// Initials carrying a QUIC version this build has no salt for.
+    pub quic_version_unsupported: u64,
 }
 
 /// One direction of one tracked flow.
@@ -133,6 +148,35 @@ impl FlowState {
     }
 }
 
+/// One tracked QUIC conversation.
+///
+/// QUIC needs far less per flow state than TCP. There is one cryptographic
+/// stream to reassemble, not two byte streams, and the only message this
+/// pipeline reads from it is the ClientHello, which lives entirely in the
+/// client's first flight of Initial packets. Once the client keys are locked
+/// from the first Initial that authenticates, every later Initial on the flow
+/// reuses them, and `done` retires the flow the moment the ClientHello is in
+/// hand or the stream proves it will never hold one.
+struct QuicFlow {
+    keys: Option<InitialKeys>,
+    crypto: CryptoAssembler,
+    largest_pn: Option<u64>,
+    done: bool,
+    last_seen_nanos: u64,
+}
+
+impl QuicFlow {
+    fn new(max_crypto_bytes: usize) -> Self {
+        Self {
+            keys: None,
+            crypto: CryptoAssembler::new(max_crypto_bytes),
+            largest_pn: None,
+            done: false,
+            last_seen_nanos: 0,
+        }
+    }
+}
+
 /// The passive fingerprinting engine.
 ///
 /// Feed it frames, take events out through the sink closure. The pipeline is
@@ -142,6 +186,7 @@ impl FlowState {
 pub struct Pipeline {
     config: PipelineConfig,
     flows: HashMap<FlowKey, FlowState>,
+    quic_flows: HashMap<FlowKey, QuicFlow>,
     counters: Counters,
 }
 
@@ -151,6 +196,7 @@ impl Pipeline {
         Self {
             config,
             flows: HashMap::new(),
+            quic_flows: HashMap::new(),
             counters: Counters::default(),
         }
     }
@@ -173,27 +219,36 @@ impl Pipeline {
         Ok(())
     }
 
-    /// Processes one captured frame.
+    /// Processes one captured frame, dispatching to the TCP or QUIC path.
     pub fn feed(&mut self, frame: &RawFrame<'_>, sink: &mut impl FnMut(FingerprintEvent)) {
         self.counters.frames += 1;
         self.counters.bytes += frame.data.len() as u64;
 
-        let segment = match decode_frame(frame.link_type, frame.data) {
-            Ok(segment) => segment,
-            Err(skip) => {
-                match skip {
-                    Skip::UnsupportedLinkType => {
-                        self.counters.skipped_unsupported_link_type += 1;
-                    }
-                    Skip::NotIp => self.counters.skipped_not_ip += 1,
-                    Skip::NotTcp => self.counters.skipped_not_tcp += 1,
-                    Skip::Malformed => self.counters.skipped_malformed += 1,
-                }
-                return;
+        match decode_frame(frame.link_type, frame.data) {
+            Ok(Decoded::Tcp(segment)) => {
+                self.counters.tcp_segments += 1;
+                self.feed_tcp(&segment, frame, sink);
             }
-        };
-        self.counters.tcp_segments += 1;
+            Ok(Decoded::Udp(datagram)) => {
+                self.counters.udp_datagrams += 1;
+                self.feed_quic(&datagram, frame, sink);
+            }
+            Err(skip) => match skip {
+                Skip::UnsupportedLinkType => self.counters.skipped_unsupported_link_type += 1,
+                Skip::NotIp => self.counters.skipped_not_ip += 1,
+                Skip::NotTransport => self.counters.skipped_not_transport += 1,
+                Skip::Malformed => self.counters.skipped_malformed += 1,
+            },
+        }
+    }
 
+    /// Feeds one TCP segment into its flow's reassembler and protocol layer.
+    fn feed_tcp(
+        &mut self,
+        segment: &DecodedSegment<'_>,
+        frame: &RawFrame<'_>,
+        sink: &mut impl FnMut(FingerprintEvent),
+    ) {
         let (key, direction) = FlowKey::from_pair(segment.src, segment.dst);
         if !self.flows.contains_key(&key) {
             if self.flows.len() >= self.config.max_flows {
@@ -261,6 +316,105 @@ impl Pipeline {
         }
     }
 
+    /// Feeds one UDP datagram into its QUIC flow, decrypting any client
+    /// Initial packets and reassembling the ClientHello they carry.
+    ///
+    /// A datagram may coalesce several QUIC packets, so the parse walks them
+    /// in turn. Each Initial is opened with the flow's locked client keys, or,
+    /// before any are locked, with keys derived from that packet's own
+    /// Destination Connection ID; the AEAD tag is what confirms a packet was
+    /// a client Initial rather than a server one this observer cannot read.
+    /// Once the contiguous CRYPTO stream holds a complete ClientHello it is
+    /// fingerprinted exactly like a TCP one, only carrying the QUIC transport
+    /// marker, and the flow is retired.
+    fn feed_quic(
+        &mut self,
+        datagram: &DecodedDatagram<'_>,
+        frame: &RawFrame<'_>,
+        sink: &mut impl FnMut(FingerprintEvent),
+    ) {
+        let (key, direction) = FlowKey::from_pair(datagram.src, datagram.dst);
+        if !self.quic_flows.contains_key(&key) {
+            if self.quic_flows.len() >= self.config.max_flows {
+                self.evict_quic(frame.ts_nanos);
+            }
+            self.quic_flows
+                .insert(key, QuicFlow::new(self.config.max_assembled_bytes));
+        }
+        let Some(flow) = self.quic_flows.get_mut(&key) else {
+            return;
+        };
+        flow.last_seen_nanos = flow.last_seen_nanos.max(frame.ts_nanos);
+        if flow.done {
+            return;
+        }
+
+        let mut offset = 0usize;
+        while offset < datagram.payload.len() {
+            let packet = match InitialPacket::parse(datagram.payload, offset) {
+                Ok(packet) => packet,
+                Err(crate::error::ParseError::UnsupportedQuicVersion(_)) => {
+                    self.counters.quic_version_unsupported += 1;
+                    break;
+                }
+                Err(_) => break,
+            };
+            self.counters.quic_initials += 1;
+            offset = packet.next_offset;
+
+            let opened = if let Some(keys) = flow.keys.as_ref() {
+                packet.open(keys, flow.largest_pn).ok()
+            } else {
+                let candidate = InitialKeys::client(packet.dcid);
+                match packet.open(&candidate, None) {
+                    Ok(opened) => {
+                        flow.keys = Some(candidate);
+                        Some(opened)
+                    }
+                    Err(_) => None,
+                }
+            };
+
+            let Some(opened) = opened else {
+                continue;
+            };
+            self.counters.quic_decrypted += 1;
+            flow.largest_pn = Some(
+                flow.largest_pn
+                    .map_or(opened.packet_number, |seen| seen.max(opened.packet_number)),
+            );
+            let crypto = &mut flow.crypto;
+            let _ = walk_crypto_frames(&opened.frames, |off, data| crypto.push(off, data));
+        }
+
+        match flow.crypto.client_hello() {
+            ClientHelloState::Ready(body) => {
+                if let Ok(hello) = parse_client_hello(body) {
+                    let (src, dst) = direction.addresses(&key);
+                    sink(FingerprintEvent {
+                        ts_nanos: frame.ts_nanos,
+                        src,
+                        dst,
+                        event: StreamEvent::ClientHello {
+                            ja3: ja3(&hello),
+                            ja3_raw: ja3_string(&hello),
+                            ja4: ja4(&hello, Transport::Quic),
+                            sni: hello.server_name().map(str::to_owned),
+                            alpn: hello
+                                .alpn_protocols()
+                                .first()
+                                .map(|p| String::from_utf8_lossy(p).into_owned()),
+                        },
+                    });
+                    self.counters.events += 1;
+                }
+                flow.done = true;
+            }
+            ClientHelloState::NotClientHello | ClientHelloState::Abandoned => flow.done = true,
+            ClientHelloState::Incomplete => {}
+        }
+    }
+
     /// Settles the books at end of capture.
     ///
     /// Streams that were recognized as TLS but never produced a complete
@@ -279,6 +433,7 @@ impl Pipeline {
             }
         }
         self.flows.clear();
+        self.quic_flows.clear();
     }
 
     /// Sheds flows when the table is full: everything idle past the timeout
@@ -325,6 +480,39 @@ impl Pipeline {
                     self.counters.streams_capped += 1;
                 }
             }
+        }
+    }
+
+    /// Sheds QUIC flows under the same policy as the TCP table: retire the
+    /// idle and the already harvested first, and if none qualify, the single
+    /// stalest flow, so a fresh handshake is never turned away for a dead one.
+    fn evict_quic(&mut self, now_nanos: u64) {
+        let timeout = self.config.idle_timeout_nanos;
+        let idle: Vec<FlowKey> = self
+            .quic_flows
+            .iter()
+            .filter(|(_, flow)| {
+                now_nanos.saturating_sub(flow.last_seen_nanos) > timeout || flow.done
+            })
+            .map(|(key, _)| *key)
+            .collect();
+
+        if idle.is_empty() {
+            let stalest = self
+                .quic_flows
+                .iter()
+                .min_by_key(|(_, flow)| flow.last_seen_nanos)
+                .map(|(key, _)| *key);
+            if let Some(key) = stalest {
+                self.quic_flows.remove(&key);
+                self.counters.flows_evicted_pressure += 1;
+            }
+            return;
+        }
+
+        for key in idle {
+            self.quic_flows.remove(&key);
+            self.counters.flows_evicted_idle += 1;
         }
     }
 }

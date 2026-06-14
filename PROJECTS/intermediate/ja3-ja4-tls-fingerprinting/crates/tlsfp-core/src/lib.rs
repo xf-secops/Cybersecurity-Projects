@@ -21,6 +21,7 @@ pub mod ja4t;
 pub mod ja4x;
 pub mod parse;
 pub mod pipeline;
+pub mod quic;
 pub mod registry;
 
 pub use error::{ParseError, Result};

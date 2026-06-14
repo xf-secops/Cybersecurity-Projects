@@ -117,24 +117,50 @@ pub struct DecodedSegment<'pkt> {
     pub payload: &'pkt [u8],
 }
 
-/// Why a frame produced no segment. The distinction only feeds counters, but
-/// the counters are how an operator learns what a capture was made of.
+/// One UDP datagram decoded out of a captured frame.
+///
+/// Addresses are directional like a TCP segment's. The payload is the UDP
+/// data, which the pipeline hands to the QUIC layer; a datagram that turns
+/// out not to be QUIC is simply ignored there, since UDP carries far more
+/// than QUIC and the fingerprinter only reads the handshake it understands.
+#[derive(Debug)]
+pub struct DecodedDatagram<'pkt> {
+    pub src: SocketAddr,
+    pub dst: SocketAddr,
+    pub payload: &'pkt [u8],
+}
+
+/// One transport payload decoded out of a captured frame.
+///
+/// The decoder surfaces the two transports the pipeline fingerprints: TCP,
+/// which carries TLS and HTTP, and UDP, which carries QUIC. Everything else
+/// is a [`Skip`].
+#[derive(Debug)]
+pub enum Decoded<'pkt> {
+    Tcp(DecodedSegment<'pkt>),
+    Udp(DecodedDatagram<'pkt>),
+}
+
+/// Why a frame produced no transport payload. The distinction only feeds
+/// counters, but the counters are how an operator learns what a capture was
+/// made of.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Skip {
     UnsupportedLinkType,
     NotIp,
-    NotTcp,
+    NotTransport,
     Malformed,
 }
 
-/// Decodes a captured frame down to its TCP segment, if it has one.
+/// Decodes a captured frame down to its transport payload, if it has one the
+/// pipeline fingerprints.
 ///
 /// VLAN tags, including stacked QinQ, are stepped over by etherparse. Frames
 /// the decoder does not understand are skipped with a reason rather than
 /// failing the capture: a fingerprinting pipeline must shrug off the GRE
 /// tunnel, the ARP chatter, and the malformed frame that share every real
-/// network with the TLS it cares about.
-pub fn decode_frame(link: i32, data: &[u8]) -> Result<DecodedSegment<'_>, Skip> {
+/// network with the TLS and QUIC it cares about.
+pub fn decode_frame(link: i32, data: &[u8]) -> Result<Decoded<'_>, Skip> {
     let sliced = match link {
         link_type::ETHERNET => SlicedPacket::from_ethernet(data),
         link_type::LINUX_SLL => SlicedPacket::from_linux_sll(data),
@@ -170,26 +196,32 @@ pub fn decode_frame(link: i32, data: &[u8]) -> Result<DecodedSegment<'_>, Skip> 
         Some(NetSlice::Arp(_)) | None => return Err(Skip::NotIp),
     };
 
-    let Some(TransportSlice::Tcp(tcp)) = &sliced.transport else {
-        return Err(Skip::NotTcp);
-    };
+    match &sliced.transport {
+        Some(TransportSlice::Tcp(tcp)) => {
+            let flags = TcpFlags::from_header(tcp.slice());
+            let syn_fingerprint = flags
+                .syn()
+                .then(|| tcp_fingerprint_input(tcp.window_size(), tcp.options()));
 
-    let flags = TcpFlags::from_header(tcp.slice());
-    let syn_fingerprint = flags
-        .syn()
-        .then(|| tcp_fingerprint_input(tcp.window_size(), tcp.options()));
-
-    Ok(DecodedSegment {
-        src: SocketAddr::new(src_ip, tcp.source_port()),
-        dst: SocketAddr::new(dst_ip, tcp.destination_port()),
-        tcp: TcpMeta {
-            seq: tcp.sequence_number(),
-            flags,
-            window_size: tcp.window_size(),
-        },
-        syn_fingerprint,
-        payload: tcp.payload(),
-    })
+            Ok(Decoded::Tcp(DecodedSegment {
+                src: SocketAddr::new(src_ip, tcp.source_port()),
+                dst: SocketAddr::new(dst_ip, tcp.destination_port()),
+                tcp: TcpMeta {
+                    seq: tcp.sequence_number(),
+                    flags,
+                    window_size: tcp.window_size(),
+                },
+                syn_fingerprint,
+                payload: tcp.payload(),
+            }))
+        }
+        Some(TransportSlice::Udp(udp)) => Ok(Decoded::Udp(DecodedDatagram {
+            src: SocketAddr::new(src_ip, udp.source_port()),
+            dst: SocketAddr::new(dst_ip, udp.destination_port()),
+            payload: udp.payload(),
+        })),
+        _ => Err(Skip::NotTransport),
+    }
 }
 
 /// Walks raw TCP options into the JA4T input.
@@ -244,9 +276,16 @@ pub fn tcp_fingerprint_input(window_size: u16, options: &[u8]) -> TcpFingerprint
 
 #[cfg(test)]
 mod tests {
-    use super::{Skip, TcpFlags, decode_frame, link_type, tcp_fingerprint_input};
+    use super::{Decoded, Skip, TcpFlags, decode_frame, link_type, tcp_fingerprint_input};
     use crate::ja4t::ja4t;
     use etherparse::PacketBuilder;
+
+    fn tcp_segment(link: i32, data: &[u8]) -> super::DecodedSegment<'_> {
+        match decode_frame(link, data) {
+            Ok(Decoded::Tcp(seg)) => seg,
+            other => panic!("expected a TCP segment, got {other:?}"),
+        }
+    }
 
     fn tcp_frame(payload: &[u8]) -> Vec<u8> {
         let builder = PacketBuilder::ethernet2([1; 6], [2; 6])
@@ -274,7 +313,7 @@ mod tests {
     #[test]
     fn decodes_an_ethernet_tcp_frame() {
         let frame = tcp_frame(b"hello");
-        let seg = decode_frame(link_type::ETHERNET, &frame).unwrap();
+        let seg = tcp_segment(link_type::ETHERNET, &frame);
         assert_eq!(seg.src.to_string(), "10.0.0.1:40000");
         assert_eq!(seg.dst.to_string(), "10.0.0.2:443");
         assert_eq!(seg.tcp.seq, 1000);
@@ -290,28 +329,44 @@ mod tests {
         let mut frame = Vec::with_capacity(builder.size(0));
         builder.write(&mut frame, &[]).unwrap();
 
-        let seg = decode_frame(link_type::ETHERNET, &frame).unwrap();
+        let seg = tcp_segment(link_type::ETHERNET, &frame);
         assert_eq!(seg.dst.port(), 443);
     }
 
     #[test]
-    fn non_tcp_and_garbage_are_skips_not_panics() {
+    fn decodes_a_udp_datagram() {
         let builder = PacketBuilder::ethernet2([1; 6], [2; 6])
             .ipv4([10, 0, 0, 1], [10, 0, 0, 2], 64)
-            .udp(5000, 53);
+            .udp(50000, 443);
         let mut udp = Vec::with_capacity(builder.size(4));
         builder.write(&mut udp, &[0xde, 0xad, 0xbe, 0xef]).unwrap();
 
+        let Ok(Decoded::Udp(datagram)) = decode_frame(link_type::ETHERNET, &udp) else {
+            panic!("expected a UDP datagram");
+        };
+        assert_eq!(datagram.src.to_string(), "10.0.0.1:50000");
+        assert_eq!(datagram.dst.port(), 443);
+        assert_eq!(datagram.payload, &[0xde, 0xad, 0xbe, 0xef]);
+    }
+
+    #[test]
+    fn non_transport_and_garbage_are_skips_not_panics() {
+        let builder = PacketBuilder::ethernet2([1; 6], [2; 6])
+            .ipv4([10, 0, 0, 1], [10, 0, 0, 2], 64)
+            .icmpv4_echo_request(1, 1);
+        let mut icmp = Vec::with_capacity(builder.size(0));
+        builder.write(&mut icmp, &[]).unwrap();
+
         assert!(matches!(
-            decode_frame(link_type::ETHERNET, &udp),
-            Err(Skip::NotTcp)
+            decode_frame(link_type::ETHERNET, &icmp),
+            Err(Skip::NotTransport)
         ));
         assert!(matches!(
             decode_frame(link_type::ETHERNET, &[0x01, 0x02]),
             Err(Skip::Malformed)
         ));
         assert!(matches!(
-            decode_frame(147, &udp),
+            decode_frame(147, &icmp),
             Err(Skip::UnsupportedLinkType)
         ));
     }

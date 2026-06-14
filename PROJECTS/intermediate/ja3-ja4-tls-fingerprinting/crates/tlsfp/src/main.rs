@@ -2,6 +2,7 @@
 // main.rs
 
 mod cli;
+mod live;
 
 use anyhow::Result;
 use clap::Parser;

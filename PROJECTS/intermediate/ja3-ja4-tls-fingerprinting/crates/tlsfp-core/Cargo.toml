@@ -26,7 +26,6 @@ pcap-parser.workspace = true
 hkdf.workspace = true
 aes.workspace = true
 aes-gcm.workspace = true
-ctr.workspace = true
 
 [dev-dependencies]
 hex.workspace = true

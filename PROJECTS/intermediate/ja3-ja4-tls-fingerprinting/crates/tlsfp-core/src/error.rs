@@ -49,9 +49,6 @@ pub enum ParseError {
 
     #[error("QUIC header protection or AEAD removal failed")]
     QuicCryptoFailure,
-
-    #[error("no CRYPTO frame carrying a ClientHello was present")]
-    NoCryptoClientHello,
 }
 
 pub type Result<T> = core::result::Result<T, ParseError>;

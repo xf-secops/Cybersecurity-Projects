@@ -32,6 +32,7 @@ pcap = "2"
 
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "signal"] }
 flume = "0.11"
+rustix = { version = "1", features = ["std", "event"] }
 
 rusqlite = { version = "0.32", features = ["bundled"] }
 
@@ -47,7 +48,6 @@ clap = { version = "4", features = ["derive"] }
 hkdf = "0.12"
 aes = "0.8"
 aes-gcm = "0.10"
-ctr = "0.9"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
