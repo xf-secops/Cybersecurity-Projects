@@ -3,7 +3,7 @@
 
 [workspace]
 resolver = "3"
-members = ["crates/tlsfp-core", "crates/tlsfp"]
+members = ["crates/tlsfp-core", "crates/tlsfp-intel", "crates/tlsfp"]
 
 [workspace.package]
 version = "0.1.0"
@@ -15,6 +15,7 @@ repository = "https://github.com/CarterPerez-dev/Cybersecurity-Projects"
 
 [workspace.dependencies]
 tlsfp-core = { path = "crates/tlsfp-core" }
+tlsfp-intel = { path = "crates/tlsfp-intel" }
 
 winnow = "0.7"
 md-5 = "0.10"
@@ -35,6 +36,7 @@ flume = "0.11"
 rustix = { version = "1", features = ["std", "event"] }
 
 rusqlite = { version = "0.32", features = ["bundled"] }
+csv = "1"
 
 axum = "0.8"
 tower-http = { version = "0.6", features = ["fs", "trace", "cors"] }

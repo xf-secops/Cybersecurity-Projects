@@ -406,9 +406,9 @@ repos:
       - id: check-symlinks
         exclude: (\.pnpm-store|node_modules)/
       - id: end-of-file-fixer
-        exclude: (\.pnpm-store|node_modules)/|^PROJECTS/advanced/hsm-emulator/vendor/
+        exclude: (\.pnpm-store|node_modules)/|^PROJECTS/advanced/hsm-emulator/vendor/|^PROJECTS/intermediate/ja3-ja4-tls-fingerprinting/crates/tlsfp-intel/seeds/
       - id: trailing-whitespace
-        exclude: (\.pnpm-store|node_modules)/|^PROJECTS/advanced/hsm-emulator/vendor/
+        exclude: (\.pnpm-store|node_modules)/|^PROJECTS/advanced/hsm-emulator/vendor/|^PROJECTS/intermediate/ja3-ja4-tls-fingerprinting/crates/tlsfp-intel/seeds/
       - id: check-illegal-windows-names
         exclude: (\.pnpm-store|node_modules)/
       - id: check-executables-have-shebangs

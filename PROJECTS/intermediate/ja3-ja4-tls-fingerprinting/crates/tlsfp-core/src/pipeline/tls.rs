@@ -149,10 +149,16 @@ fn advance_http(proto: &mut StreamProtocol, stream: &[u8], sink: &mut impl FnMut
             .iter()
             .find(|(name, _)| name.eq_ignore_ascii_case("host"))
             .map(|(_, value)| value.clone());
+        let user_agent = request
+            .headers
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case("user-agent"))
+            .map(|(_, value)| value.clone());
         sink(StreamEvent::HttpRequest {
             ja4h: ja4h(&request),
             method: request.method.clone(),
             host,
+            user_agent,
         });
         *proto = StreamProtocol::Done;
     } else {

@@ -6,7 +6,7 @@ applies to what.
 
 ## Our own code
 
-Everything under `crates/` is original work licensed under the MIT License (see
+Everything under `crates/` is original work licensed under the AGPL 3.0 License (see
 `LICENSE`). No source code from any reference implementation was copied. The
 algorithms were implemented from their published specifications.
 

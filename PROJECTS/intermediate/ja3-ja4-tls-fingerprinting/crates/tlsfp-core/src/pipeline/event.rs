@@ -36,6 +36,8 @@ pub enum StreamEvent {
         ja4h: Ja4Family,
         method: String,
         host: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        user_agent: Option<String>,
     },
     TcpSyn {
         ja4t: String,
@@ -84,10 +86,18 @@ impl fmt::Display for FingerprintEvent {
                 write!(f, "server_hello ja4s={} ja3s={ja3s}", ja4s.hash)
             }
             StreamEvent::Certificate { ja4x } => write!(f, "certificate ja4x={ja4x}"),
-            StreamEvent::HttpRequest { ja4h, method, host } => {
+            StreamEvent::HttpRequest {
+                ja4h,
+                method,
+                host,
+                user_agent,
+            } => {
                 write!(f, "http_request ja4h={} method={method}", ja4h.hash)?;
                 if let Some(host) = host {
                     write!(f, " host={host}")?;
+                }
+                if let Some(user_agent) = user_agent {
+                    write!(f, " ua={user_agent}")?;
                 }
                 Ok(())
             }
