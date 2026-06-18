@@ -30,9 +30,18 @@
   pointer-events: none;
   z-index: 0;
 
+  @include breakpoint-down('lg') {
+    opacity: 0.6;
+    right: -16%;
+  }
+
   @include breakpoint-down('md') {
-    opacity: 0.4;
-    right: -20%;
+    opacity: 0.3;
+    right: -24%;
+  }
+
+  @include breakpoint-down('sm') {
+    opacity: 0.16;
   }
 }
 
@@ -93,7 +102,7 @@
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  max-width: 60ch;
+  max-width: 80ch;
   padding-block: $space-8;
 }
 
@@ -104,7 +113,7 @@
   text-transform: uppercase;
   color: $fire;
   text-shadow: 0 0 10px rgb(255, 77, 18, 28%);
-  margin-bottom: $space-5;
+  margin-bottom: $space-6;
 }
 
 .title {
@@ -113,26 +122,15 @@
   line-height: 0.82;
   letter-spacing: 0.01em;
   color: $chalk;
-  margin: 0 0 $space-5;
+  margin: 0 0 $space-7;
   text-shadow: 0 0 48px rgb(47, 123, 255, 16%);
 }
 
-// The mono tag reads as a tight stamp under the masthead, so it is kept short
-// and never allowed to run the full measure of the prose below it.
-.under {
-  max-width: 34ch;
-  font-family: $font-mono;
-  font-size: $font-size-xs;
-  line-height: 1.55;
-  letter-spacing: 0.12em;
-  color: $ash;
-}
-
-// The thesis runs wider and thinner than the tag, a long low band of prose
+// The thesis runs wider and thinner than the title, a long low band of prose
 // reaching toward the specimen rather than a narrow stacked column.
 .thesis {
-  max-width: 54ch;
-  margin-top: $space-8;
+  max-width: clamp(54ch, 30vw + 17ch, 76ch);
+  margin-top: 0;
   font-size: $font-size-base;
   line-height: 1.6;
   color: $paper;

@@ -20,7 +20,7 @@ export function Component(): React.ReactElement {
     <div className={styles.page}>
       <section className={styles.masthead}>
         <img
-          src="/assets/objects/xray-butterfly.jpg"
+          src="/assets/objects/xray-butterfly.png"
           alt=""
           className={styles.butterfly}
         />

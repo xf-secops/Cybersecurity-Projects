@@ -19,7 +19,7 @@ export function Component(): React.ReactElement {
   return (
     <div className={styles.page}>
       <img
-        src="/assets/objects/xray-butterfly.jpg"
+        src="/assets/objects/xray-butterfly.png"
         alt=""
         className={styles.specimen}
       />
@@ -38,9 +38,6 @@ export function Component(): React.ReactElement {
       <main className={styles.center}>
         <span className={styles.over}>sleep is counter surveillance</span>
         <h1 className={styles.title}>TLSFP</h1>
-        <span className={styles.under}>
-          the fingerprint of every client that speaks tls
-        </span>
         <p className={styles.thesis}>
           An x-ray of the handshake. Every client carries a fingerprint it cannot
           hide, and the instant a user-agent claims to be a browser while its

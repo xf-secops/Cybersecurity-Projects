@@ -14,11 +14,7 @@ export function Component(): React.ReactElement {
   return (
     <div className={styles.page}>
       <section className={styles.head}>
-        <img
-          src="/assets/objects/xray-lily.webp"
-          alt=""
-          className={styles.lily}
-        />
+        <img src="/assets/objects/xray-lily.png" alt="" className={styles.lily} />
         <div className={styles.headText}>
           <span className={styles.over}>threat intelligence / catalogue</span>
           <h1 className={styles.title}>THE CORPUS</h1>
