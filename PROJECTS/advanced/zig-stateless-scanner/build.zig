@@ -8,7 +8,7 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
 
     const opts = b.addOptions();
-    opts.addOption([]const u8, "version", "0.0.0-m3");
+    opts.addOption([]const u8, "version", "0.0.0-m4");
 
     const packet_mod = b.createModule(.{
         .root_source_file = b.path("src/packet.zig"),
@@ -81,6 +81,35 @@ pub fn build(b: *std.Build) void {
     tx_mod.addImport("cookie", cookie_mod);
     tx_mod.addImport("packet", packet_mod);
 
+    const classify_mod = b.createModule(.{
+        .root_source_file = b.path("src/classify.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    classify_mod.addImport("packet", packet_mod);
+    classify_mod.addImport("cookie", cookie_mod);
+
+    const dedup_mod = b.createModule(.{
+        .root_source_file = b.path("src/dedup.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const rx_mod = b.createModule(.{
+        .root_source_file = b.path("src/rx.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    rx_mod.addImport("classify", classify_mod);
+    rx_mod.addImport("dedup", dedup_mod);
+    rx_mod.addImport("cookie", cookie_mod);
+
+    const netutil_mod = b.createModule(.{
+        .root_source_file = b.path("src/netutil.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
     const txcmd_mod = b.createModule(.{
         .root_source_file = b.path("src/txcmd.zig"),
         .target = target,
@@ -92,6 +121,22 @@ pub fn build(b: *std.Build) void {
     txcmd_mod.addImport("afpacket", afpacket_mod);
     txcmd_mod.addImport("cookie", cookie_mod);
     txcmd_mod.addImport("tx", tx_mod);
+    txcmd_mod.addImport("netutil", netutil_mod);
+
+    const scancmd_mod = b.createModule(.{
+        .root_source_file = b.path("src/scancmd.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    scancmd_mod.addImport("targets", targets_mod);
+    scancmd_mod.addImport("template", template_mod);
+    scancmd_mod.addImport("ratelimit", ratelimit_mod);
+    scancmd_mod.addImport("afpacket", afpacket_mod);
+    scancmd_mod.addImport("cookie", cookie_mod);
+    scancmd_mod.addImport("tx", tx_mod);
+    scancmd_mod.addImport("rx", rx_mod);
+    scancmd_mod.addImport("dedup", dedup_mod);
+    scancmd_mod.addImport("netutil", netutil_mod);
 
     const exe = b.addExecutable(.{
         .name = "zingela",
@@ -105,6 +150,7 @@ pub fn build(b: *std.Build) void {
     exe.root_module.addImport("cli", cli_mod);
     exe.root_module.addImport("smoke", smoke_mod);
     exe.root_module.addImport("txcmd", txcmd_mod);
+    exe.root_module.addImport("scancmd", scancmd_mod);
     b.installArtifact(exe);
 
     const run_cmd = b.addRunArtifact(exe);
@@ -121,7 +167,7 @@ pub fn build(b: *std.Build) void {
     smoke_step.dependOn(&smoke_cmd.step);
 
     const test_step = b.step("test", "Run unit tests");
-    const test_mods = [_]*std.Build.Module{ packet_mod, cli_mod, smoke_mod, cookie_mod, numtheory_mod, targets_mod, ratelimit_mod, template_mod, afpacket_mod, tx_mod, txcmd_mod };
+    const test_mods = [_]*std.Build.Module{ packet_mod, cli_mod, smoke_mod, cookie_mod, numtheory_mod, targets_mod, ratelimit_mod, template_mod, afpacket_mod, tx_mod, txcmd_mod, classify_mod, dedup_mod, rx_mod, netutil_mod, scancmd_mod };
     for (test_mods) |mod| {
         const t = b.addTest(.{ .root_module = mod });
         const rt = b.addRunArtifact(t);

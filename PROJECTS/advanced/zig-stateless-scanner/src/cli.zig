@@ -50,10 +50,11 @@ pub fn printHelp(io: std.Io) !void {
         \\commands:
         \\  smoke [ifname]   send one hand-built SYN via AF_PACKET (default ifname: lo)
         \\  tx [options]     PACKET_TX_RING SYN blast over a target range (privileged)
+        \\  scan [options]   SYN scan: transmit + classify replies open/closed/filtered (privileged)
         \\  --version, -V    print version
         \\  --help, -h       print this help
         \\
-        \\tx options:
+        \\tx / scan options:
         \\  --target <cidr>  target range, required (e.g. 10.0.0.0/24)
         \\  --ports <list>   comma-separated dst ports (default 80)
         \\  --rate <pps>     token-bucket rate, packets per second (default 10000)
@@ -63,6 +64,9 @@ pub fn printHelp(io: std.Io) !void {
         \\  --src-port <n>   source TCP port (default 40000)
         \\  --gw-mac <mac>   gateway/dst MAC aa:bb:cc:dd:ee:ff (default 00:..:00)
         \\  --seed <n>       permutation seed (default: per-scan CSPRNG)
+        \\
+        \\scan-only options:
+        \\  --wait <ms>      receive drain window after transmit (default 2000)
         \\
         \\authorized use only. responsible default rate; needs CAP_NET_RAW
         \\(grant once: sudo setcap cap_net_raw,cap_net_admin=eip ./zig-out/bin/zingela)

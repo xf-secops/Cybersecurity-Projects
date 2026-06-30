@@ -5,6 +5,7 @@ const std = @import("std");
 const cli = @import("cli");
 const smoke = @import("smoke");
 const txcmd = @import("txcmd");
+const scancmd = @import("scancmd");
 
 pub fn main(init: std.process.Init) !void {
     const io = init.io;
@@ -22,6 +23,9 @@ pub fn main(init: std.process.Init) !void {
     }
     if (std.mem.eql(u8, cmd, "tx")) {
         return txcmd.run(io, arena, args);
+    }
+    if (std.mem.eql(u8, cmd, "scan")) {
+        return scancmd.run(io, arena, args);
     }
     return cli.printHelp(io);
 }
