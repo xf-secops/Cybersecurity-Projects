@@ -4,6 +4,7 @@
 const std = @import("std");
 const targets = @import("targets");
 const template = @import("template");
+const udp = @import("udp");
 const ratelimit = @import("ratelimit");
 const afpacket = @import("afpacket");
 const cookie = @import("cookie");
@@ -16,10 +17,12 @@ const output = @import("output");
 const default_iface = "lo";
 const default_rate: u64 = 10_000;
 const default_src_port: u16 = 40_000;
+const default_udp_src_span: u16 = 8_192;
 const default_wait_ms: i32 = 2_000;
 const ns_per_ms: u64 = 1_000_000;
 const ns_per_sec: u64 = 1_000_000_000;
-const default_ports = [_]u16{80};
+const default_tcp_ports = [_]u16{80};
+const default_udp_ports = [_]u16{ 53, 123, 161 };
 const dedup_capacity: usize = 1024;
 const queue_capacity: usize = 2048;
 const drain_batch: usize = 256;
@@ -53,9 +56,9 @@ const TxSink = struct {
     }
 };
 
-fn txWorker(
+fn txWorkerImpl(
     engine: *targets.Engine,
-    tmpl: *const template.SynTemplate,
+    tmpl: anytype,
     bucket: *ratelimit.TokenBucket,
     sink: *TxSink,
     max_packets: u64,
@@ -69,14 +72,21 @@ fn txWorker(
     return sent;
 }
 
-fn rxWorker(
-    receiver: *rx.Receiver,
-    ck: cookie.Cookie,
-    dd: *dedup.Dedup,
-    sink: *rx.QueueSink,
-    rx_done: *std.atomic.Value(bool),
-) void {
-    rx.run(receiver, ck, dd, sink);
+fn txWorkerTcp(engine: *targets.Engine, tmpl: *const template.SynTemplate, bucket: *ratelimit.TokenBucket, sink: *TxSink, max_packets: u64, budget_ns: u64, tx_done: *std.atomic.Value(bool)) u64 {
+    return txWorkerImpl(engine, tmpl, bucket, sink, max_packets, budget_ns, tx_done);
+}
+
+fn txWorkerUdp(engine: *targets.Engine, tmpl: *const udp.UdpTemplate, bucket: *ratelimit.TokenBucket, sink: *TxSink, max_packets: u64, budget_ns: u64, tx_done: *std.atomic.Value(bool)) u64 {
+    return txWorkerImpl(engine, tmpl, bucket, sink, max_packets, budget_ns, tx_done);
+}
+
+fn rxWorkerTcp(receiver: *rx.Receiver, ck: cookie.Cookie, dd: *dedup.Dedup, sink: *rx.QueueSink, rx_done: *std.atomic.Value(bool)) void {
+    rx.run(receiver, rx.TcpClassifier{ .ck = ck }, dd, sink);
+    rx_done.store(true, .release);
+}
+
+fn rxWorkerUdp(receiver: *rx.Receiver, ck: cookie.Cookie, base: u16, span: u16, dd: *dedup.Dedup, sink: *rx.QueueSink, rx_done: *std.atomic.Value(bool)) void {
+    rx.run(receiver, rx.UdpClassifier{ .ck = ck, .base = base, .span = span }, dd, sink);
     rx_done.store(true, .release);
 }
 
@@ -86,11 +96,12 @@ fn absorb(
     allocator: std.mem.Allocator,
     stats: *output.Stats,
     json_out: ?*std.Io.Writer,
+    proto: []const u8,
 ) void {
     for (batch) |r| {
         found.append(allocator, r) catch continue;
         stats.record(r.state);
-        if (json_out) |w| output.emitJson(w, r) catch {};
+        if (json_out) |w| output.emitJson(w, r, proto) catch {};
     }
 }
 
@@ -102,11 +113,12 @@ fn drainQueue(
     allocator: std.mem.Allocator,
     stats: *output.Stats,
     json_out: ?*std.Io.Writer,
+    proto: []const u8,
 ) void {
     while (true) {
         const n = queue.get(io, buf, 0) catch return;
         if (n == 0) return;
-        absorb(buf[0..n], found, allocator, stats, json_out);
+        absorb(buf[0..n], found, allocator, stats, json_out, proto);
         if (n < buf.len) return;
     }
 }
@@ -138,8 +150,18 @@ pub fn run(io: std.Io, allocator: std.mem.Allocator, args: []const []const u8, e
     const src_port = if (netutil.getFlag(args, "--src-port")) |p| try std.fmt.parseInt(u16, p, 10) else default_src_port;
     const wait_ms = if (netutil.getFlag(args, "--wait")) |w| try std.fmt.parseInt(i32, w, 10) else default_wait_ms;
     const json = netutil.hasFlag(args, "--json");
+    const is_udp = netutil.hasFlag(args, "--udp");
+    const udp_base: u16 = src_port;
+    const udp_span: u16 = @intCast(@min(@as(u32, default_udp_src_span), 65536 - @as(u32, udp_base)));
+    const proto_json: []const u8 = if (is_udp) "udp" else "tcp";
+    const probe_label: []const u8 = if (is_udp) "UDP" else "SYN";
 
-    const ports = if (netutil.getFlag(args, "--ports")) |p| try netutil.parsePorts(allocator, p) else try allocator.dupe(u16, &default_ports);
+    const ports = if (netutil.getFlag(args, "--ports")) |p|
+        try netutil.parsePorts(allocator, p)
+    else if (is_udp)
+        try allocator.dupe(u16, &default_udp_ports)
+    else
+        try allocator.dupe(u16, &default_tcp_ports);
     const gw_mac = if (netutil.getFlag(args, "--gw-mac")) |m| try netutil.parseMac(m) else [_]u8{0} ** 6;
     const src_ip = if (netutil.getFlag(args, "--src-ip")) |s| try netutil.parseIpv4(s) else try netutil.resolveSrcIp(ifname);
     const src_mac = try netutil.resolveSrcMac(ifname);
@@ -167,11 +189,19 @@ pub fn run(io: std.Io, allocator: std.mem.Allocator, args: []const []const u8, e
     const dash_total = @min(count, eng.total);
 
     const ck = try cookie.Cookie.random(io);
-    const tmpl = template.SynTemplate.init(.{
+    const tcp_tmpl = template.SynTemplate.init(.{
         .src_mac = src_mac,
         .dst_mac = gw_mac,
         .src_ip = src_ip,
         .src_port = src_port,
+        .cookie = ck,
+    });
+    const udp_tmpl = udp.UdpTemplate.init(.{
+        .src_mac = src_mac,
+        .dst_mac = gw_mac,
+        .src_ip = src_ip,
+        .src_port_base = udp_base,
+        .src_port_span = udp_span,
         .cookie = ck,
     });
     var bucket = ratelimit.TokenBucket.init(rate, rate);
@@ -218,7 +248,7 @@ pub fn run(io: std.Io, allocator: std.mem.Allocator, args: []const []const u8, e
     var stats: output.Stats = .{};
     const json_out: ?*std.Io.Writer = if (json) out else null;
 
-    try derr.print("zingela  target {s}  iface {s}  rate {d} pps  ports {d}\n", .{ target_text, ifname, rate, ports.len });
+    try derr.print("zingela  {s} scan  target {s}  iface {s}  rate {d} pps  ports {d}\n", .{ probe_label, target_text, ifname, rate, ports.len });
     try derr.flush();
 
     var clock = netutil.RealClock{};
@@ -227,12 +257,20 @@ pub fn run(io: std.Io, allocator: std.mem.Allocator, args: []const []const u8, e
     var tx_sink = TxSink{ .backend = &backend, .sent = &stats.sent.v };
     var rx_sink = rx.QueueSink{ .queue = &queue, .io = io };
 
-    var tx_fut = io.concurrent(txWorker, .{ &eng, &tmpl, &bucket, &tx_sink, count, tx_budget_ns, &tx_done }) catch {
+    const tx_res = if (is_udp)
+        io.concurrent(txWorkerUdp, .{ &eng, &udp_tmpl, &bucket, &tx_sink, count, tx_budget_ns, &tx_done })
+    else
+        io.concurrent(txWorkerTcp, .{ &eng, &tcp_tmpl, &bucket, &tx_sink, count, tx_budget_ns, &tx_done });
+    var tx_fut = tx_res catch {
         try derr.writeAll(concurrency_hint);
         try derr.flush();
         return;
     };
-    var rx_fut = io.concurrent(rxWorker, .{ &receiver, ck, &dd, &rx_sink, &rx_done }) catch {
+    const rx_res = if (is_udp)
+        io.concurrent(rxWorkerUdp, .{ &receiver, ck, udp_base, udp_span, &dd, &rx_sink, &rx_done })
+    else
+        io.concurrent(rxWorkerTcp, .{ &receiver, ck, &dd, &rx_sink, &rx_done });
+    var rx_fut = rx_res catch {
         _ = tx_fut.await(io);
         try derr.writeAll(concurrency_hint);
         try derr.flush();
@@ -245,7 +283,7 @@ pub fn run(io: std.Io, allocator: std.mem.Allocator, args: []const []const u8, e
     var last_render: u64 = 0;
 
     while (!(tx_done.load(.acquire) and rx_done.load(.acquire))) {
-        drainQueue(io, &queue, drain_buf[0..], &found, found_alloc, &stats, json_out);
+        drainQueue(io, &queue, drain_buf[0..], &found, found_alloc, &stats, json_out, proto_json);
         if (json) out.flush() catch {};
         const now = clock.now();
         if (last_render == 0 or now -| last_render >= render_interval_ns) {
@@ -258,7 +296,7 @@ pub fn run(io: std.Io, allocator: std.mem.Allocator, args: []const []const u8, e
     const sent = tx_fut.await(io);
     rx_fut.await(io);
     queue.close(io);
-    drainQueue(io, &queue, drain_buf[0..], &found, found_alloc, &stats, json_out);
+    drainQueue(io, &queue, drain_buf[0..], &found, found_alloc, &stats, json_out, proto_json);
     if (json) out.flush() catch {};
 
     dash.render(derr, &stats, clock.now() -| t0) catch {};
@@ -285,6 +323,10 @@ pub fn run(io: std.Io, allocator: std.mem.Allocator, args: []const []const u8, e
 
     const elapsed_s = @as(f64, @floatFromInt(clock.now() - t0)) / @as(f64, @floatFromInt(ns_per_sec));
     try derr.writeByte('\n');
-    try output.renderSummary(derr, err_level, sent, ifname, elapsed_s, open_n, closed_n, filtered_n);
+    try output.renderSummary(derr, err_level, sent, probe_label, ifname, elapsed_s, open_n, closed_n, filtered_n);
+    if (is_udp) {
+        const answered = open_n + closed_n + filtered_n;
+        try output.renderUnanswered(derr, err_level, sent -| answered);
+    }
     try derr.flush();
 }

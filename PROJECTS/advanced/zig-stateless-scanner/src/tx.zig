@@ -10,7 +10,7 @@ const packet = @import("packet");
 
 pub fn run(
     engine: *targets.Engine,
-    tmpl: *const template.SynTemplate,
+    tmpl: anytype,
     bucket: *ratelimit.TokenBucket,
     sink: anytype,
     clock: anytype,
@@ -19,7 +19,7 @@ pub fn run(
 ) u64 {
     _ = bucket.takeBatch(clock.now(), 0);
     var sent: u64 = 0;
-    var frame: [template.SynTemplate.frame_len]u8 = undefined;
+    var frame: [@TypeOf(tmpl.*).max_frame_len]u8 = undefined;
 
     var pending: ?targets.Target = engine.next();
     while (pending != null and sent < max_packets) {
@@ -33,11 +33,11 @@ pub fn run(
         var n: u64 = 0;
         while (n < granted) : (n += 1) {
             const t = pending orelse break;
-            tmpl.stamp(&frame, t.ip, t.port);
-            if (!sink.submit(&frame)) {
+            const len = tmpl.stamp(&frame, t.ip, t.port);
+            if (!sink.submit(frame[0..len])) {
                 @branchHint(.unlikely);
                 sink.kick();
-                if (!sink.submit(&frame)) break;
+                if (!sink.submit(frame[0..len])) break;
             }
             sent += 1;
             pending = engine.next();

@@ -32,6 +32,12 @@ pub const Cookie = struct {
     pub fn validateSynAck(self: Cookie, ack: u32, ip_them: u32, port_them: u16, ip_me: u32, port_me: u16) bool {
         return ack == self.seq(ip_them, port_them, ip_me, port_me) +% 1;
     }
+
+    pub fn udpSrcPort(self: Cookie, ip_them: u32, port_them: u16, ip_me: u32, base: u16, span: u16) u16 {
+        const s: u32 = if (span == 0) 1 else span;
+        const off: u32 = @intCast(self.generate(ip_them, port_them, ip_me, 0) % s);
+        return @intCast((@as(u32, base) + off) & 0xffff);
+    }
 };
 
 const test_key = [16]u8{
@@ -71,4 +77,28 @@ test "validateSynAck accepts ack == seq + 1 and rejects others" {
 test "validateSynAck wraps at the u32 boundary" {
     const seq_max: u32 = 0xFFFFFFFF;
     try std.testing.expectEqual(@as(u32, 0), seq_max +% 1);
+}
+
+test "udpSrcPort is deterministic and stays inside [base, base+span)" {
+    const c = Cookie.init(test_key);
+    const base: u16 = 40000;
+    const span: u16 = 8192;
+    const a = c.udpSrcPort(0x08080808, 53, 0x0a000001, base, span);
+    const b = c.udpSrcPort(0x08080808, 53, 0x0a000001, base, span);
+    try std.testing.expectEqual(a, b);
+    try std.testing.expect(a >= base and a < base + span);
+}
+
+test "udpSrcPort excludes port_me from the tuple so RX can recompute it" {
+    const c = Cookie.init(test_key);
+    const full = c.generate(0x08080808, 53, 0x0a000001, 0);
+    const want: u16 = @intCast((@as(u32, 40000) + @as(u32, @intCast(full % 8192))) & 0xffff);
+    try std.testing.expectEqual(want, c.udpSrcPort(0x08080808, 53, 0x0a000001, 40000, 8192));
+}
+
+test "udpSrcPort separates distinct targets" {
+    const c = Cookie.init(test_key);
+    const p53 = c.udpSrcPort(0x08080808, 53, 0x0a000001, 40000, 8192);
+    const p123 = c.udpSrcPort(0x08080808, 123, 0x0a000001, 40000, 8192);
+    try std.testing.expect(p53 != p123);
 }

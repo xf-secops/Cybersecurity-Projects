@@ -340,10 +340,10 @@ pub const Dashboard = struct {
     }
 };
 
-pub fn emitJson(out: *std.Io.Writer, r: Result) !void {
+pub fn emitJson(out: *std.Io.Writer, r: Result, proto: []const u8) !void {
     try out.print("{{\"ip\":\"", .{});
     try writeIp(out, r.ip);
-    try out.print("\",\"port\":{d},\"proto\":\"tcp\",\"state\":\"{s}\"}}\n", .{ r.port, stateName(r.state) });
+    try out.print("\",\"port\":{d},\"proto\":\"{s}\",\"state\":\"{s}\"}}\n", .{ r.port, proto, stateName(r.state) });
 }
 
 const w_host: usize = 17;
@@ -440,6 +440,7 @@ pub fn renderSummary(
     out: *std.Io.Writer,
     level: ColorLevel,
     sent: u64,
+    probe: []const u8,
     ifname: []const u8,
     elapsed_s: f64,
     open: u64,
@@ -452,7 +453,9 @@ pub fn renderSummary(
     try span(out, level, chrome_gray, "sent ");
     try setFg(out, level, bright_white);
     try writeThousands(out, sent);
-    try span(out, level, chrome_gray, " SYN on ");
+    try setFg(out, level, chrome_gray);
+    try out.print(" {s} on ", .{probe});
+    try resetFg(out, level);
     try setFg(out, level, bright_white);
     try out.writeAll(ifname);
     try span(out, level, chrome_gray, " in ");
@@ -470,6 +473,26 @@ pub fn renderSummary(
     try span(out, level, chrome_gray, " filtered");
     try resetFg(out, level);
     try out.writeByte('\n');
+}
+
+pub fn renderUnanswered(out: *std.Io.Writer, level: ColorLevel, count: u64) !void {
+    try out.writeAll("  ");
+    try span(out, level, violet_mid, gutter_bar);
+    try out.writeByte(' ');
+    try span(out, level, chrome_gray, "open|filtered (no response) ");
+    try setFg(out, level, soft_amber);
+    try writeThousands(out, count);
+    try resetFg(out, level);
+    try out.writeByte('\n');
+}
+
+test "renderUnanswered reports the silent-port count in plain mode" {
+    var buf: [128]u8 = undefined;
+    var w = std.Io.Writer.fixed(&buf);
+    try renderUnanswered(&w, .none, 4094);
+    const text = buf[0..w.end];
+    try std.testing.expect(std.mem.indexOf(u8, text, "open|filtered (no response)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "4,094") != null);
 }
 
 test "resolveLevel honors choice, tty state, and truecolor" {
@@ -518,12 +541,18 @@ test "Stats.record tallies per-state and total found without cross-talk" {
     try std.testing.expectEqual(@as(u64, 0), s.sent.v.load(.monotonic));
 }
 
-test "emitJson writes one greppable NDJSON object per result" {
+test "emitJson writes one greppable NDJSON object per result with its proto" {
     var buf: [128]u8 = undefined;
     var w = std.Io.Writer.fixed(&buf);
-    try emitJson(&w, .{ .ip = 0x0a000005, .port = 80, .state = .open });
+    try emitJson(&w, .{ .ip = 0x0a000005, .port = 80, .state = .open }, "tcp");
     try std.testing.expectEqualStrings(
         "{\"ip\":\"10.0.0.5\",\"port\":80,\"proto\":\"tcp\",\"state\":\"open\"}\n",
+        buf[0..w.end],
+    );
+    w = std.Io.Writer.fixed(&buf);
+    try emitJson(&w, .{ .ip = 0x08080808, .port = 53, .state = .closed }, "udp");
+    try std.testing.expectEqualStrings(
+        "{\"ip\":\"8.8.8.8\",\"port\":53,\"proto\":\"udp\",\"state\":\"closed\"}\n",
         buf[0..w.end],
     );
 }

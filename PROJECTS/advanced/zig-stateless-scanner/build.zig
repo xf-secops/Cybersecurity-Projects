@@ -8,7 +8,7 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
 
     const opts = b.addOptions();
-    opts.addOption([]const u8, "version", "0.0.0-m5");
+    opts.addOption([]const u8, "version", "0.0.0-m6");
 
     const packet_mod = b.createModule(.{
         .root_source_file = b.path("src/packet.zig"),
@@ -62,6 +62,21 @@ pub fn build(b: *std.Build) void {
     });
     template_mod.addImport("packet", packet_mod);
     template_mod.addImport("cookie", cookie_mod);
+
+    const payloads_mod = b.createModule(.{
+        .root_source_file = b.path("src/payloads.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const udp_mod = b.createModule(.{
+        .root_source_file = b.path("src/udp.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    udp_mod.addImport("packet", packet_mod);
+    udp_mod.addImport("cookie", cookie_mod);
+    udp_mod.addImport("payloads", payloads_mod);
 
     const afpacket_mod = b.createModule(.{
         .root_source_file = b.path("src/afpacket.zig"),
@@ -138,6 +153,7 @@ pub fn build(b: *std.Build) void {
     });
     scancmd_mod.addImport("targets", targets_mod);
     scancmd_mod.addImport("template", template_mod);
+    scancmd_mod.addImport("udp", udp_mod);
     scancmd_mod.addImport("ratelimit", ratelimit_mod);
     scancmd_mod.addImport("afpacket", afpacket_mod);
     scancmd_mod.addImport("cookie", cookie_mod);
@@ -176,7 +192,7 @@ pub fn build(b: *std.Build) void {
     smoke_step.dependOn(&smoke_cmd.step);
 
     const test_step = b.step("test", "Run unit tests");
-    const test_mods = [_]*std.Build.Module{ packet_mod, cli_mod, smoke_mod, cookie_mod, numtheory_mod, targets_mod, ratelimit_mod, template_mod, afpacket_mod, tx_mod, txcmd_mod, classify_mod, dedup_mod, rx_mod, netutil_mod, output_mod, scancmd_mod };
+    const test_mods = [_]*std.Build.Module{ packet_mod, cli_mod, smoke_mod, cookie_mod, numtheory_mod, targets_mod, ratelimit_mod, template_mod, payloads_mod, udp_mod, afpacket_mod, tx_mod, txcmd_mod, classify_mod, dedup_mod, rx_mod, netutil_mod, output_mod, scancmd_mod };
     for (test_mods) |mod| {
         const t = b.addTest(.{ .root_module = mod });
         const rt = b.addRunArtifact(t);

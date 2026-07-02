@@ -17,6 +17,7 @@ const default_window: u16 = 1024;
 
 pub const SynTemplate = struct {
     pub const frame_len: usize = 54;
+    pub const max_frame_len: usize = frame_len;
 
     base: [frame_len]u8,
     src_ip_be: u32,
@@ -76,7 +77,7 @@ pub const SynTemplate = struct {
         };
     }
 
-    pub fn stamp(self: *const SynTemplate, out: *[frame_len]u8, dst_ip: u32, dst_port: u16) void {
+    pub fn stamp(self: *const SynTemplate, out: *[frame_len]u8, dst_ip: u32, dst_port: u16) usize {
         @memcpy(out, &self.base);
 
         std.mem.writeInt(u32, out[30..34], dst_ip, .big);
@@ -92,6 +93,7 @@ pub const SynTemplate = struct {
         const dst_be = std.mem.nativeToBig(u32, dst_ip);
         const tcp_ck = packet.tcpChecksum(self.src_ip_be, dst_be, out[34..54]);
         std.mem.writeInt(u16, out[50..52], tcp_ck, .big);
+        return frame_len;
     }
 };
 
@@ -110,7 +112,7 @@ test "stamped frame is 54 bytes with self-verifying IP and TCP checksums" {
         .cookie = ck,
     });
     var frame: [SynTemplate.frame_len]u8 = undefined;
-    tmpl.stamp(&frame, 0x08080808, 443);
+    _ = tmpl.stamp(&frame, 0x08080808, 443);
 
     try std.testing.expectEqual(@as(usize, 54), frame.len);
     try std.testing.expectEqual(@as(u16, 0), packet.checksum(frame[14..34]));
@@ -129,7 +131,7 @@ test "stamp writes the destination and the SipHash seq" {
         .cookie = ck,
     });
     var frame: [SynTemplate.frame_len]u8 = undefined;
-    tmpl.stamp(&frame, 0x08080808, 443);
+    _ = tmpl.stamp(&frame, 0x08080808, 443);
 
     try std.testing.expectEqual(@as(u32, 0x08080808), std.mem.readInt(u32, frame[30..34], .big));
     try std.testing.expectEqual(@as(u16, 443), std.mem.readInt(u16, frame[36..38], .big));
@@ -148,7 +150,7 @@ test "two different targets produce two different seqs" {
     });
     var a: [SynTemplate.frame_len]u8 = undefined;
     var b: [SynTemplate.frame_len]u8 = undefined;
-    tmpl.stamp(&a, 0x08080808, 443);
-    tmpl.stamp(&b, 0x08080808, 80);
+    _ = tmpl.stamp(&a, 0x08080808, 443);
+    _ = tmpl.stamp(&b, 0x08080808, 80);
     try std.testing.expect(!std.mem.eql(u8, a[38..42], b[38..42]));
 }

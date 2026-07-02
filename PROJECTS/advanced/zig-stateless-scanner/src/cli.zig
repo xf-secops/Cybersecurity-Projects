@@ -48,16 +48,18 @@ pub fn printHelp(io: std.Io, env: *std.process.Environ.Map) !void {
         \\
         \\tx / scan options:
         \\  --target <cidr>  target range, required (e.g. 10.0.0.0/24)
-        \\  --ports <list>   comma-separated dst ports (default 80)
+        \\  --ports <list>   comma-separated dst ports (default 80; --udp: 53,123,161)
         \\  --rate <pps>     token-bucket rate, packets per second (default 10000)
         \\  --count <n>      stop after n packets (default: every target once)
         \\  --iface <name>   egress interface (default lo)
         \\  --src-ip <addr>  source IPv4 (default: resolved from --iface)
-        \\  --src-port <n>   source TCP port (default 40000)
+        \\  --src-port <n>   source port; UDP uses it as the cookie-range base (default 40000)
         \\  --gw-mac <mac>   gateway/dst MAC aa:bb:cc:dd:ee:ff (default 00:..:00)
         \\  --seed <n>       permutation seed (default: per-scan CSPRNG)
         \\
         \\scan-only options:
+        \\  --udp            UDP scan: per-protocol payloads, ICMP type3/code3 = closed,
+        \\                   silent ports reported honestly as open|filtered
         \\  --wait <ms>      receive drain window after transmit (default 2000)
         \\  --json           emit NDJSON results to stdout (visuals go to stderr)
         \\  --color <when>   auto | always | never (default auto)

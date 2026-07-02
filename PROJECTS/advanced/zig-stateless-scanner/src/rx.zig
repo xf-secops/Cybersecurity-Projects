@@ -8,6 +8,8 @@ const cookie = @import("cookie");
 
 pub const Result = classify.Result;
 pub const State = classify.State;
+pub const TcpClassifier = classify.TcpClassifier;
+pub const UdpClassifier = classify.UdpClassifier;
 
 const RECV_BUF_LEN: usize = 2048;
 const PORT_BITS: u6 = 16;
@@ -18,10 +20,10 @@ pub fn resultKey(r: Result) u64 {
     return (@as(u64, r.ip) << PORT_BITS) | r.port;
 }
 
-pub fn run(source: anytype, ck: cookie.Cookie, dd: *dedup.Dedup, sink: anytype) void {
+pub fn run(source: anytype, clf: anytype, dd: *dedup.Dedup, sink: anytype) void {
     var buf: [RECV_BUF_LEN]u8 = undefined;
     while (source.recv(&buf)) |n| {
-        if (classify.classify(buf[0..n], ck)) |r| {
+        if (clf.match(buf[0..n])) |r| {
             if (dd.insert(resultKey(r))) sink.emit(r);
         }
     }
@@ -213,7 +215,7 @@ test "engine classifies, dedups, and emits each found host once" {
 
     var src = FakeSource{ .frames = &frames };
     var sink = CollectSink{ .list = &list, .allocator = std.testing.allocator };
-    run(&src, ck, &dd, &sink);
+    run(&src, classify.TcpClassifier{ .ck = ck }, &dd, &sink);
 
     try std.testing.expectEqual(@as(usize, 2), list.items.len);
     try std.testing.expectEqual(State.open, list.items[0].state);
@@ -258,7 +260,7 @@ test "Io.Queue hands the deduped set from a producer to a consumer fiber" {
 
     var src = FakeSource{ .frames = &frames };
     var sink = QueueSink{ .queue = &queue, .io = io };
-    run(&src, ck, &dd, &sink);
+    run(&src, classify.TcpClassifier{ .ck = ck }, &dd, &sink);
     queue.close(io);
     consumer.await(io);
 

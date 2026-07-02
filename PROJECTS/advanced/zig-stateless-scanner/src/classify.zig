@@ -18,6 +18,7 @@ const ETH_OFF_TYPE: usize = 12;
 const ETHERTYPE_IPV4: u16 = 0x0800;
 
 const IPPROTO_TCP: u8 = 6;
+const IPPROTO_UDP: u8 = 17;
 const IPPROTO_ICMP: u8 = 1;
 const IP_MIN_IHL: usize = 20;
 const IP_IHL_MASK: u8 = 0x0f;
@@ -27,6 +28,13 @@ const IP_OFF_SRC: usize = 12;
 const IP_OFF_DST: usize = 16;
 
 const INNER_TCP_MIN_LEN: usize = 8;
+const INNER_UDP_MIN_LEN: usize = 8;
+
+const UDP_OFF_SPORT: usize = 0;
+const UDP_OFF_DPORT: usize = 2;
+const UDP_MIN_LEN: usize = 8;
+
+const ICMP_CODE_PORT_UNREACH: u8 = 3;
 
 const TCP_OFF_SPORT: usize = 0;
 const TCP_OFF_DPORT: usize = 2;
@@ -47,6 +55,13 @@ const ICMP_OFF_CODE: usize = 1;
 fn icmpCodeIsFilteredForSyn(code: u8) bool {
     return switch (code) {
         1, 2, 3, 9, 10, 13 => true,
+        else => false,
+    };
+}
+
+fn icmpCodeIsFilteredForUdp(code: u8) bool {
+    return switch (code) {
+        1, 2, 9, 10, 13 => true,
         else => false,
     };
 }
@@ -116,10 +131,84 @@ pub fn classify(frame: []const u8, ck: cookie.Cookie) ?Result {
     return null;
 }
 
+pub fn classifyUdp(frame: []const u8, ck: cookie.Cookie, base: u16, span: u16) ?Result {
+    if (frame.len < ETH_HDR_LEN + IP_MIN_IHL) return null;
+    if (std.mem.readInt(u16, frame[ETH_OFF_TYPE..][0..2], .big) != ETHERTYPE_IPV4) return null;
+
+    const ip = ETH_HDR_LEN;
+    const ihl = ihlBytes(frame[ip]);
+    if (ihl < IP_MIN_IHL or frame.len < ip + ihl) return null;
+
+    const proto = frame[ip + IP_OFF_PROTO];
+    const ip_src = std.mem.readInt(u32, frame[ip + IP_OFF_SRC ..][0..4], .big);
+    const ip_dst = std.mem.readInt(u32, frame[ip + IP_OFF_DST ..][0..4], .big);
+
+    if (proto == IPPROTO_UDP) {
+        const udp = ip + ihl;
+        if (frame.len < udp + UDP_MIN_LEN) return null;
+        const sport = std.mem.readInt(u16, frame[udp + UDP_OFF_SPORT ..][0..2], .big);
+        const dport = std.mem.readInt(u16, frame[udp + UDP_OFF_DPORT ..][0..2], .big);
+        if (dport == ck.udpSrcPort(ip_src, sport, ip_dst, base, span))
+            return .{ .ip = ip_src, .port = sport, .state = .open };
+        return null;
+    }
+
+    if (proto == IPPROTO_ICMP) {
+        const icmp = ip + ihl;
+        if (frame.len < icmp + ICMP_HDR_LEN) return null;
+        if (frame[icmp + ICMP_OFF_TYPE] != ICMP_TYPE_DEST_UNREACH) return null;
+        const code = frame[icmp + ICMP_OFF_CODE];
+        const state: State = if (code == ICMP_CODE_PORT_UNREACH)
+            .closed
+        else if (icmpCodeIsFilteredForUdp(code))
+            .filtered
+        else
+            return null;
+
+        const inner = icmp + ICMP_HDR_LEN;
+        if (frame.len < inner + IP_MIN_IHL) return null;
+        const inner_ihl = ihlBytes(frame[inner]);
+        if (inner_ihl < IP_MIN_IHL) return null;
+        if (frame[inner + IP_OFF_PROTO] != IPPROTO_UDP) return null;
+
+        const inner_src = std.mem.readInt(u32, frame[inner + IP_OFF_SRC ..][0..4], .big);
+        const inner_dst = std.mem.readInt(u32, frame[inner + IP_OFF_DST ..][0..4], .big);
+        const inner_udp = inner + inner_ihl;
+        if (frame.len < inner_udp + INNER_UDP_MIN_LEN) return null;
+        const inner_sport = std.mem.readInt(u16, frame[inner_udp + UDP_OFF_SPORT ..][0..2], .big);
+        const inner_dport = std.mem.readInt(u16, frame[inner_udp + UDP_OFF_DPORT ..][0..2], .big);
+
+        if (inner_sport == ck.udpSrcPort(inner_dst, inner_dport, inner_src, base, span))
+            return .{ .ip = inner_dst, .port = inner_dport, .state = state };
+        return null;
+    }
+
+    return null;
+}
+
+pub const TcpClassifier = struct {
+    ck: cookie.Cookie,
+
+    pub fn match(self: TcpClassifier, frame: []const u8) ?Result {
+        return classify(frame, self.ck);
+    }
+};
+
+pub const UdpClassifier = struct {
+    ck: cookie.Cookie,
+    base: u16,
+    span: u16,
+
+    pub fn match(self: UdpClassifier, frame: []const u8) ?Result {
+        return classifyUdp(frame, self.ck, self.base, self.span);
+    }
+};
+
 comptime {
     std.debug.assert(@sizeOf(packet.EthHdr) == ETH_HDR_LEN);
     std.debug.assert(@sizeOf(packet.Ipv4Hdr) == IP_MIN_IHL);
     std.debug.assert(@sizeOf(packet.TcpHdr) == TCP_MIN_LEN);
+    std.debug.assert(@sizeOf(packet.UdpHdr) == UDP_MIN_LEN);
 }
 
 const test_key = [16]u8{
@@ -252,4 +341,134 @@ test "runt frames return null instead of reading out of bounds" {
     try std.testing.expect(classify(&tiny, ck) == null);
     var empty = [_]u8{};
     try std.testing.expect(classify(&empty, ck) == null);
+}
+
+const udp_base: u16 = 40000;
+const udp_span: u16 = 8192;
+const udp_port: u16 = 53;
+
+fn buildUdpReply(buf: *[42]u8, ip_src: u32, ip_dst: u32, sport: u16, dport: u16) void {
+    @memset(buf, 0);
+    std.mem.writeInt(u16, buf[ETH_OFF_TYPE..][0..2], ETHERTYPE_IPV4, .big);
+    buf[ETH_HDR_LEN] = 0x45;
+    buf[ETH_HDR_LEN + IP_OFF_PROTO] = IPPROTO_UDP;
+    std.mem.writeInt(u32, buf[ETH_HDR_LEN + IP_OFF_SRC ..][0..4], ip_src, .big);
+    std.mem.writeInt(u32, buf[ETH_HDR_LEN + IP_OFF_DST ..][0..4], ip_dst, .big);
+    const udp = ETH_HDR_LEN + IP_MIN_IHL;
+    std.mem.writeInt(u16, buf[udp + UDP_OFF_SPORT ..][0..2], sport, .big);
+    std.mem.writeInt(u16, buf[udp + UDP_OFF_DPORT ..][0..2], dport, .big);
+}
+
+fn buildIcmpUdpUnreach(buf: *[128]u8, code: u8, inner_src: u32, inner_dst: u32, inner_sport: u16, inner_dport: u16) usize {
+    @memset(buf, 0);
+    std.mem.writeInt(u16, buf[ETH_OFF_TYPE..][0..2], ETHERTYPE_IPV4, .big);
+    buf[ETH_HDR_LEN] = 0x45;
+    buf[ETH_HDR_LEN + IP_OFF_PROTO] = IPPROTO_ICMP;
+    std.mem.writeInt(u32, buf[ETH_HDR_LEN + IP_OFF_SRC ..][0..4], inner_dst, .big);
+    std.mem.writeInt(u32, buf[ETH_HDR_LEN + IP_OFF_DST ..][0..4], inner_src, .big);
+    const icmp = ETH_HDR_LEN + IP_MIN_IHL;
+    buf[icmp + ICMP_OFF_TYPE] = ICMP_TYPE_DEST_UNREACH;
+    buf[icmp + ICMP_OFF_CODE] = code;
+    const inner = icmp + ICMP_HDR_LEN;
+    buf[inner] = 0x45;
+    buf[inner + IP_OFF_PROTO] = IPPROTO_UDP;
+    std.mem.writeInt(u32, buf[inner + IP_OFF_SRC ..][0..4], inner_src, .big);
+    std.mem.writeInt(u32, buf[inner + IP_OFF_DST ..][0..4], inner_dst, .big);
+    const inner_udp = inner + IP_MIN_IHL;
+    std.mem.writeInt(u16, buf[inner_udp + UDP_OFF_SPORT ..][0..2], inner_sport, .big);
+    std.mem.writeInt(u16, buf[inner_udp + UDP_OFF_DPORT ..][0..2], inner_dport, .big);
+    return inner_udp + INNER_UDP_MIN_LEN;
+}
+
+test "validated UDP response classifies as open" {
+    const ck = cookie.Cookie.init(test_key);
+    const our_src = ck.udpSrcPort(their_ip, udp_port, our_ip, udp_base, udp_span);
+    var f: [42]u8 = undefined;
+    buildUdpReply(&f, their_ip, our_ip, udp_port, our_src);
+    const r = classifyUdp(&f, ck, udp_base, udp_span).?;
+    try std.testing.expectEqual(State.open, r.state);
+    try std.testing.expectEqual(their_ip, r.ip);
+    try std.testing.expectEqual(udp_port, r.port);
+}
+
+test "UDP response to a non-cookie destination port is rejected (anti-spoof)" {
+    const ck = cookie.Cookie.init(test_key);
+    var f: [42]u8 = undefined;
+    buildUdpReply(&f, their_ip, our_ip, udp_port, 12345);
+    try std.testing.expect(classifyUdp(&f, ck, udp_base, udp_span) == null);
+}
+
+test "validated ICMP port-unreachable (type 3 code 3) classifies as closed for UDP" {
+    const ck = cookie.Cookie.init(test_key);
+    const our_src = ck.udpSrcPort(their_ip, udp_port, our_ip, udp_base, udp_span);
+    var f: [128]u8 = undefined;
+    const len = buildIcmpUdpUnreach(&f, 3, our_ip, their_ip, our_src, udp_port);
+    const r = classifyUdp(f[0..len], ck, udp_base, udp_span).?;
+    try std.testing.expectEqual(State.closed, r.state);
+    try std.testing.expectEqual(their_ip, r.ip);
+    try std.testing.expectEqual(udp_port, r.port);
+}
+
+test "validated ICMP type 3 code 1 classifies as filtered for UDP" {
+    const ck = cookie.Cookie.init(test_key);
+    const our_src = ck.udpSrcPort(their_ip, udp_port, our_ip, udp_base, udp_span);
+    var f: [128]u8 = undefined;
+    const len = buildIcmpUdpUnreach(&f, 1, our_ip, their_ip, our_src, udp_port);
+    const r = classifyUdp(f[0..len], ck, udp_base, udp_span).?;
+    try std.testing.expectEqual(State.filtered, r.state);
+    try std.testing.expectEqual(their_ip, r.ip);
+    try std.testing.expectEqual(udp_port, r.port);
+}
+
+test "ICMP UDP-unreachable with a mismatched inner source port is rejected" {
+    const ck = cookie.Cookie.init(test_key);
+    var f: [128]u8 = undefined;
+    const len = buildIcmpUdpUnreach(&f, 3, our_ip, their_ip, 9999, udp_port);
+    try std.testing.expect(classifyUdp(f[0..len], ck, udp_base, udp_span) == null);
+}
+
+test "ICMP UDP-unreachable with a non-unreachable type is ignored" {
+    const ck = cookie.Cookie.init(test_key);
+    const our_src = ck.udpSrcPort(their_ip, udp_port, our_ip, udp_base, udp_span);
+    var f: [128]u8 = undefined;
+    const len = buildIcmpUdpUnreach(&f, 3, our_ip, their_ip, our_src, udp_port);
+    f[ETH_HDR_LEN + IP_MIN_IHL + ICMP_OFF_TYPE] = 8;
+    try std.testing.expect(classifyUdp(f[0..len], ck, udp_base, udp_span) == null);
+}
+
+test "classifyUdp ignores non-IPv4 and runt frames" {
+    const ck = cookie.Cookie.init(test_key);
+    var f: [42]u8 = undefined;
+    buildUdpReply(&f, their_ip, our_ip, udp_port, ck.udpSrcPort(their_ip, udp_port, our_ip, udp_base, udp_span));
+    std.mem.writeInt(u16, f[ETH_OFF_TYPE..][0..2], 0x0806, .big);
+    try std.testing.expect(classifyUdp(&f, ck, udp_base, udp_span) == null);
+    var tiny = [_]u8{0} ** 20;
+    try std.testing.expect(classifyUdp(&tiny, ck, udp_base, udp_span) == null);
+}
+
+test "the same ICMP code 3 is closed for UDP but filtered for a TCP SYN scan" {
+    const ck = cookie.Cookie.init(test_key);
+    const our_src = ck.udpSrcPort(their_ip, udp_port, our_ip, udp_base, udp_span);
+    var f: [128]u8 = undefined;
+    const len = buildIcmpUdpUnreach(&f, 3, our_ip, their_ip, our_src, udp_port);
+    try std.testing.expectEqual(State.closed, classifyUdp(f[0..len], ck, udp_base, udp_span).?.state);
+    try std.testing.expect(icmpCodeIsFilteredForSyn(3));
+    try std.testing.expect(!icmpCodeIsFilteredForUdp(3));
+}
+
+test "classifier adapters route each frame to the right protocol path" {
+    const ck = cookie.Cookie.init(test_key);
+
+    const our_seq = ck.seq(their_ip, their_port, our_ip, our_port);
+    var tcp_f: [54]u8 = undefined;
+    buildTcpReply(&tcp_f, their_ip, our_ip, their_port, our_port, 0xCAFEBABE, our_seq +% 1, TCP_FLAG_SYN | TCP_FLAG_ACK);
+    const tcp_clf = TcpClassifier{ .ck = ck };
+    try std.testing.expectEqual(State.open, tcp_clf.match(&tcp_f).?.state);
+
+    const our_src = ck.udpSrcPort(their_ip, udp_port, our_ip, udp_base, udp_span);
+    var udp_f: [42]u8 = undefined;
+    buildUdpReply(&udp_f, their_ip, our_ip, udp_port, our_src);
+    const udp_clf = UdpClassifier{ .ck = ck, .base = udp_base, .span = udp_span };
+    try std.testing.expectEqual(State.open, udp_clf.match(&udp_f).?.state);
+    try std.testing.expect(tcp_clf.match(&udp_f) == null);
 }

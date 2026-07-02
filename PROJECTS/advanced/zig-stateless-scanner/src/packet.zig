@@ -35,10 +35,18 @@ pub const TcpHdr = extern struct {
     urgent: u16,
 };
 
+pub const UdpHdr = extern struct {
+    src_port: u16,
+    dst_port: u16,
+    length: u16,
+    checksum: u16,
+};
+
 comptime {
     std.debug.assert(@sizeOf(EthHdr) == 14);
     std.debug.assert(@sizeOf(Ipv4Hdr) == 20);
     std.debug.assert(@sizeOf(TcpHdr) == 20);
+    std.debug.assert(@sizeOf(UdpHdr) == 8);
 }
 
 pub fn checksum(bytes: []const u8) u16 {
@@ -118,10 +126,38 @@ pub fn tcpChecksum(src_be: u32, dst_be: u32, segment: []const u8) u16 {
     return ~@as(u16, @truncate(sum));
 }
 
+pub fn udpChecksum(src_be: u32, dst_be: u32, segment: []const u8) u16 {
+    var pseudo: [12]u8 = undefined;
+    @memcpy(pseudo[0..4], std.mem.asBytes(&src_be));
+    @memcpy(pseudo[4..8], std.mem.asBytes(&dst_be));
+    pseudo[8] = 0;
+    pseudo[9] = 17;
+    std.mem.writeInt(u16, pseudo[10..12], @intCast(segment.len), .big);
+
+    var sum: u32 = 0;
+    var i: usize = 0;
+    while (i + 1 < pseudo.len) : (i += 2) {
+        sum += (@as(u32, pseudo[i]) << 8) | @as(u32, pseudo[i + 1]);
+    }
+    i = 0;
+    while (i + 1 < segment.len) : (i += 2) {
+        sum += (@as(u32, segment[i]) << 8) | @as(u32, segment[i + 1]);
+    }
+    if (i < segment.len) {
+        sum += @as(u32, segment[i]) << 8;
+    }
+    while (sum >> 16 != 0) {
+        sum = (sum & 0xffff) + (sum >> 16);
+    }
+    const folded: u16 = ~@as(u16, @truncate(sum));
+    return if (folded == 0) 0xffff else folded;
+}
+
 test "header sizes are wire-exact" {
     try std.testing.expectEqual(@as(usize, 14), @sizeOf(EthHdr));
     try std.testing.expectEqual(@as(usize, 20), @sizeOf(Ipv4Hdr));
     try std.testing.expectEqual(@as(usize, 20), @sizeOf(TcpHdr));
+    try std.testing.expectEqual(@as(usize, 8), @sizeOf(UdpHdr));
 }
 
 test "RFC 1071 checksum matches the canonical IPv4 KAT (0xb861)" {
@@ -192,4 +228,28 @@ test "tcpChecksum self-verifies: a segment with its correct checksum folds to 0"
     const dst = std.mem.nativeToBig(u32, 0x7f000001);
     tcp.checksum = std.mem.nativeToBig(u16, tcpChecksum(src, dst, std.mem.asBytes(&tcp)));
     try std.testing.expectEqual(@as(u16, 0), tcpChecksum(src, dst, std.mem.asBytes(&tcp)));
+}
+
+test "udpChecksum self-verifies: a correct datagram re-sums to the 0xFFFF all-ones marker" {
+    const src = std.mem.nativeToBig(u32, 0x7f000001);
+    const dst = std.mem.nativeToBig(u32, 0x08080808);
+    var seg: [12]u8 = undefined;
+    var hdr = UdpHdr{
+        .src_port = std.mem.nativeToBig(u16, 40000),
+        .dst_port = std.mem.nativeToBig(u16, 53),
+        .length = std.mem.nativeToBig(u16, 12),
+        .checksum = 0,
+    };
+    @memcpy(seg[0..8], std.mem.asBytes(&hdr));
+    @memcpy(seg[8..12], "abcd");
+    const ck = udpChecksum(src, dst, &seg);
+    try std.testing.expect(ck != 0);
+    hdr.checksum = std.mem.nativeToBig(u16, ck);
+    @memcpy(seg[0..8], std.mem.asBytes(&hdr));
+    try std.testing.expectEqual(@as(u16, 0xffff), udpChecksum(src, dst, &seg));
+}
+
+test "udpChecksum maps a computed 0x0000 to 0xFFFF (IPv4 UDP quirk)" {
+    try std.testing.expectEqual(@as(u16, 0xffff), udpChecksum(0, 0, &[_]u8{ 0xff, 0xec }));
+    try std.testing.expect(udpChecksum(0, 0, &[_]u8{ 0xff, 0xec }) != 0);
 }
