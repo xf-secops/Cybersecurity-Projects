@@ -61,6 +61,9 @@ pub fn printHelp(io: std.Io, env: *std.process.Environ.Map) !void {
         \\scan-only options:
         \\  --udp            UDP scan: per-protocol payloads, ICMP type3/code3 = closed,
         \\                   silent ports reported honestly as open|filtered
+        \\  --banners        SYN-scan only: phase-2 service/banner grab on open ports
+        \\                   (NULL probe + HTTP GET, TLS detected not decrypted, no JA4);
+        \\                   auto-installs a scoped RST-drop so the grab survives the kernel
         \\  --wait <ms>      receive drain window after transmit (default 2000)
         \\  --json           emit NDJSON results to stdout (visuals go to stderr)
         \\  --color <when>   auto | always | never (default auto)

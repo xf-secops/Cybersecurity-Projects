@@ -31,6 +31,7 @@ pub const Stats = struct {
     closed: Padded = .{},
     filtered: Padded = .{},
     unfiltered: Padded = .{},
+    banners: Padded = .{},
 
     pub fn record(self: *Stats, st: State) void {
         _ = self.found.v.fetchAdd(1, .monotonic);
@@ -240,6 +241,7 @@ pub const Dashboard = struct {
     interactive: bool,
     total: u64,
     drawn: bool = false,
+    banners_mode: bool = false,
 
     const body_lines: usize = 5;
 
@@ -270,9 +272,11 @@ pub const Dashboard = struct {
 
         if (!self.interactive) {
             try out.print(
-                "[up {d:.0}s] sent {d} / {d}  found {d} (open {d} closed {d} filtered {d})  {d:.2} kpps\n",
-                .{ elapsed_s, sent, self.total, found, op, cl, fi, kpps },
+                "[up {d:.0}s] sent {d} / {d}  found {d} (open {d} closed {d} filtered {d})",
+                .{ elapsed_s, sent, self.total, found, op, cl, fi },
             );
+            if (self.banners_mode) try out.print("  banners {d}", .{s.banners.v.load(.monotonic)});
+            try out.print("  {d:.2} kpps\n", .{kpps});
             try out.flush();
             return;
         }
@@ -441,6 +445,107 @@ pub fn ipPortLess(_: void, a: Result, b: Result) bool {
     return a.port < b.port;
 }
 
+pub const ServiceRow = struct {
+    ip: u32,
+    port: u16,
+    service: []const u8,
+    info: []const u8,
+    tls: bool,
+};
+
+const w_service: usize = 11;
+const w_info: usize = 34;
+
+fn serviceRule(out: *std.Io.Writer, level: ColorLevel, left: []const u8, mid: []const u8, right: []const u8) !void {
+    try setFg(out, level, chrome_gray);
+    try out.writeAll(left);
+    try repeat(out, box_h, w_host + 2);
+    try out.writeAll(mid);
+    try repeat(out, box_h, w_port + 2);
+    try out.writeAll(mid);
+    try repeat(out, box_h, w_service + 2);
+    try out.writeAll(mid);
+    try repeat(out, box_h, w_info + 2);
+    try out.writeAll(right);
+    try resetFg(out, level);
+    try out.writeByte('\n');
+}
+
+fn renderCell(out: *std.Io.Writer, level: ColorLevel, text: []const u8, width: usize, color: Rgb) !void {
+    const n = @min(text.len, width);
+    try setFg(out, level, color);
+    try out.writeAll(text[0..n]);
+    try resetFg(out, level);
+    try pad(out, width - n);
+}
+
+pub fn renderServices(out: *std.Io.Writer, level: ColorLevel, rows: []const ServiceRow) !void {
+    try out.writeAll("  ");
+    try serviceRule(out, level, "\u{250c}", "\u{252c}", "\u{2510}");
+
+    try out.writeAll("  ");
+    try span(out, level, chrome_gray, "\u{2502} ");
+    try renderCell(out, level,"HOST", w_host, bright_white);
+    try span(out, level, chrome_gray, " \u{2502} ");
+    try renderCell(out, level,"PORT", w_port, bright_white);
+    try span(out, level, chrome_gray, " \u{2502} ");
+    try renderCell(out, level,"SERVICE", w_service, bright_white);
+    try span(out, level, chrome_gray, " \u{2502} ");
+    try renderCell(out, level,"VERSION / INFO", w_info, bright_white);
+    try span(out, level, chrome_gray, " \u{2502}");
+    try out.writeByte('\n');
+
+    try out.writeAll("  ");
+    try serviceRule(out, level, "\u{251c}", "\u{253c}", "\u{2524}");
+
+    for (rows) |r| {
+        var ipbuf: [15]u8 = undefined;
+        var ipw = std.Io.Writer.fixed(&ipbuf);
+        try writeIp(&ipw, r.ip);
+
+        var portbuf: [5]u8 = undefined;
+        const port_str = std.fmt.bufPrint(&portbuf, "{d}", .{r.port}) catch unreachable;
+
+        const info_disp = if (r.info.len > 0) r.info else if (r.tls) "(encrypted)" else "";
+
+        try out.writeAll("  ");
+        try span(out, level, chrome_gray, "\u{2502} ");
+        try renderCell(out, level,ipbuf[0..ipw.end], w_host, bright_white);
+        try span(out, level, chrome_gray, " \u{2502} ");
+        try pad(out, w_port - port_str.len);
+        try setFg(out, level, bright_white);
+        try out.writeAll(port_str);
+        try resetFg(out, level);
+        try span(out, level, chrome_gray, " \u{2502} ");
+        try renderCell(out, level,r.service, w_service, neon_green);
+        try span(out, level, chrome_gray, " \u{2502} ");
+        try renderCell(out, level,info_disp, w_info, bright_white);
+        try span(out, level, chrome_gray, " \u{2502}");
+        try out.writeByte('\n');
+    }
+
+    try out.writeAll("  ");
+    try serviceRule(out, level, "\u{2514}", "\u{2534}", "\u{2518}");
+}
+
+fn jsonEscape(out: *std.Io.Writer, s: []const u8) !void {
+    for (s) |c| switch (c) {
+        '"' => try out.writeAll("\\\""),
+        '\\' => try out.writeAll("\\\\"),
+        else => try out.writeByte(c),
+    };
+}
+
+pub fn emitServiceJson(out: *std.Io.Writer, row: ServiceRow) !void {
+    try out.writeAll("{\"ip\":\"");
+    try writeIp(out, row.ip);
+    try out.print("\",\"port\":{d},\"service\":\"", .{row.port});
+    try jsonEscape(out, row.service);
+    try out.writeAll("\",\"info\":\"");
+    try jsonEscape(out, row.info);
+    try out.print("\",\"tls\":{s}}}\n", .{if (row.tls) "true" else "false"});
+}
+
 pub fn renderSummary(
     out: *std.Io.Writer,
     level: ColorLevel,
@@ -452,6 +557,7 @@ pub fn renderSummary(
     closed: u64,
     filtered: u64,
     unfiltered: u64,
+    banners: u64,
 ) !void {
     try out.writeAll("  ");
     try span(out, level, violet_mid, gutter_bar);
@@ -482,6 +588,12 @@ pub fn renderSummary(
         try setFg(out, level, bright_white);
         try writeThousands(out, unfiltered);
         try span(out, level, chrome_gray, " unfiltered");
+    }
+    if (banners > 0) {
+        try span(out, level, chrome_gray, "  \u{2192}  ");
+        try setFg(out, level, neon_green);
+        try writeThousands(out, banners);
+        try span(out, level, chrome_gray, " banners");
     }
     try resetFg(out, level);
     try out.writeByte('\n');
@@ -616,4 +728,41 @@ test "ipPortLess orders by ip then port" {
     try std.testing.expect(ipPortLess({}, b, a));
     try std.testing.expect(ipPortLess({}, a, c));
     try std.testing.expect(!ipPortLess({}, a, b));
+}
+
+test "emitServiceJson emits an escaped, greppable service record" {
+    var buf: [256]u8 = undefined;
+    var w = std.Io.Writer.fixed(&buf);
+    try emitServiceJson(&w, .{ .ip = 0x0a000005, .port = 22, .service = "ssh", .info = "OpenSSH_9.6p1", .tls = false });
+    try std.testing.expectEqualStrings(
+        "{\"ip\":\"10.0.0.5\",\"port\":22,\"service\":\"ssh\",\"info\":\"OpenSSH_9.6p1\",\"tls\":false}\n",
+        buf[0..w.end],
+    );
+}
+
+test "emitServiceJson escapes quotes and backslashes in the info field" {
+    var buf: [256]u8 = undefined;
+    var w = std.Io.Writer.fixed(&buf);
+    try emitServiceJson(&w, .{ .ip = 0x0a000006, .port = 443, .service = "ssl/tls", .info = "a\"b\\c", .tls = true });
+    const text = buf[0..w.end];
+    try std.testing.expect(std.mem.indexOf(u8, text, "\\\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "\\\\") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "\"tls\":true") != null);
+}
+
+test "renderServices lists each host, service, and version without escapes in plain mode" {
+    var buf: [4096]u8 = undefined;
+    var w = std.Io.Writer.fixed(&buf);
+    const rows = [_]ServiceRow{
+        .{ .ip = 0x0a000005, .port = 22, .service = "ssh", .info = "OpenSSH_9.6p1", .tls = false },
+        .{ .ip = 0x0a000006, .port = 443, .service = "ssl/tls", .info = "", .tls = true },
+    };
+    try renderServices(&w, .none, &rows);
+    const text = buf[0..w.end];
+    try std.testing.expect(std.mem.indexOf(u8, text, "10.0.0.5") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "ssh") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "OpenSSH_9.6p1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "ssl/tls") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "(encrypted)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, esc) == null);
 }

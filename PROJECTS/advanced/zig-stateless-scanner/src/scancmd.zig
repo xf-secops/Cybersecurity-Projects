@@ -14,6 +14,7 @@ const dedup = @import("dedup");
 const netutil = @import("netutil");
 const output = @import("output");
 const stealth = @import("stealth");
+const service = @import("service");
 
 const default_iface = "lo";
 const default_rate: u64 = 10_000;
@@ -27,6 +28,8 @@ const default_udp_ports = [_]u16{ 53, 123, 161 };
 const dedup_capacity: usize = 1024;
 const queue_capacity: usize = 2048;
 const drain_batch: usize = 256;
+const finding_queue_capacity: usize = 256;
+const finding_drain_batch: usize = 64;
 const drain_tick_ns: u64 = 50 * ns_per_ms;
 const render_tick_interactive_ns: u64 = 125 * ns_per_ms;
 const render_tick_plain_ns: u64 = 1_000 * ns_per_ms;
@@ -65,6 +68,22 @@ const TxSink = struct {
     }
 };
 
+const FindingSink = struct {
+    queue: *std.Io.Queue(service.Finding),
+    io: std.Io,
+
+    fn emitImpl(ctx: *anyopaque, f: service.Finding) void {
+        const self: *FindingSink = @ptrCast(@alignCast(ctx));
+        self.queue.putOne(self.io, f) catch {};
+    }
+
+    const vtable = service.Sink.Vtable{ .emit = emitImpl };
+
+    pub fn sink(self: *FindingSink) service.Sink {
+        return .{ .ctx = self, .vtable = &vtable };
+    }
+};
+
 fn txWorkerImpl(
     engine: *targets.Engine,
     tmpl: anytype,
@@ -97,6 +116,63 @@ fn rxWorkerTcp(receiver: *rx.Receiver, clf: rx.TcpClassifier, dd: *dedup.Dedup, 
 fn rxWorkerUdp(receiver: *rx.Receiver, ck: cookie.Cookie, base: u16, span: u16, dd: *dedup.Dedup, sink: *rx.QueueSink, rx_done: *std.atomic.Value(bool)) void {
     rx.run(receiver, rx.UdpClassifier{ .ck = ck, .base = base, .span = span }, dd, sink);
     rx_done.store(true, .release);
+}
+
+fn svcWorker(
+    engine: *service.Engine,
+    socket: *service.Socket,
+    sink: service.Sink,
+    tx_done: *std.atomic.Value(bool),
+    drain_window_ns: u64,
+    hard_cap_ns: u64,
+    svc_done: *std.atomic.Value(bool),
+) void {
+    service.run(engine, socket, sink, tx_done, drain_window_ns, hard_cap_ns);
+    svc_done.store(true, .release);
+}
+
+fn drainFindings(
+    io: std.Io,
+    queue: *std.Io.Queue(service.Finding),
+    buf: []service.Finding,
+    findings: *std.ArrayList(service.Finding),
+    dd: *dedup.Dedup,
+    allocator: std.mem.Allocator,
+    json_out: ?*std.Io.Writer,
+) void {
+    while (true) {
+        const n = queue.get(io, buf, 0) catch return;
+        if (n == 0) return;
+        for (buf[0..n]) |f| {
+            if (!dd.insert(service.connKey(f.ip, f.port))) continue;
+            findings.append(allocator, f) catch continue;
+            if (json_out) |w| output.emitServiceJson(w, .{
+                .ip = f.ip,
+                .port = f.port,
+                .service = f.info.service,
+                .info = f.info.infoSlice(),
+                .tls = f.info.tls,
+            }) catch {};
+        }
+        if (n < buf.len) return;
+    }
+}
+
+fn findingLess(_: void, a: service.Finding, b: service.Finding) bool {
+    if (a.ip != b.ip) return a.ip < b.ip;
+    return a.port < b.port;
+}
+
+fn renderServiceTable(out: *std.Io.Writer, level: output.ColorLevel, allocator: std.mem.Allocator, items: []service.Finding) !void {
+    const rows = try allocator.alloc(output.ServiceRow, items.len);
+    for (items, 0..) |*f, i| rows[i] = .{
+        .ip = f.ip,
+        .port = f.port,
+        .service = f.info.service,
+        .info = f.info.infoSlice(),
+        .tls = f.info.tls,
+    };
+    try output.renderServices(out, level, rows);
 }
 
 fn absorb(
@@ -160,6 +236,7 @@ pub fn run(io: std.Io, allocator: std.mem.Allocator, args: []const []const u8, e
     const wait_ms = if (netutil.getFlag(args, "--wait")) |w| try std.fmt.parseInt(i32, w, 10) else default_wait_ms;
     const json = netutil.hasFlag(args, "--json");
     const is_udp = netutil.hasFlag(args, "--udp");
+    const banners_flag = netutil.hasFlag(args, "--banners");
     const backend_choice = packet_io.parseChoice(netutil.getFlag(args, "--backend")) orelse {
         try derr.writeAll("scan: --backend must be one of auto, xdp, afpacket\n");
         try derr.flush();
@@ -203,6 +280,13 @@ pub fn run(io: std.Io, allocator: std.mem.Allocator, args: []const []const u8, e
 
     if (is_udp and (scfg.profile != .none or scfg.scan != .syn or scfg.rotate or scfg.decoys.len > 0 or scfg.suppress_rst)) {
         try derr.writeAll("  note: --os-template/--scan-type/--source-port-rotation/--decoys/--suppress-rst apply to TCP scans; ignored for --udp\n");
+    }
+    if (is_udp and banners_flag) {
+        try derr.writeAll("  note: --banners is a TCP feature; ignored for --udp\n");
+    }
+    const banners = banners_flag and !is_udp and scfg.scan == .syn;
+    if (banners_flag and !is_udp and scfg.scan != .syn) {
+        try derr.writeAll("  note: --banners needs a full handshake; ignored for non-SYN scan types\n");
     }
 
     const udp_base: u16 = src_port;
@@ -296,11 +380,13 @@ pub fn run(io: std.Io, allocator: std.mem.Allocator, args: []const []const u8, e
     }
 
     var supp: ?stealth.RstSuppressor = null;
-    if (scfg.suppress_rst and !is_udp) {
+    if ((scfg.suppress_rst or banners) and !is_udp) {
         const lo = src_port;
         const hi = if (scfg.rotate) src_port +| (rot_span -| 1) else src_port;
         supp = stealth.RstSuppressor.install(allocator, io, src_ip, lo, hi) catch |e| blk: {
-            try derr.print("  note: RST-suppression unavailable ({s}); continuing without it\n", .{@errorName(e)});
+            try derr.print("  note: RST-suppression unavailable ({s})", .{@errorName(e)});
+            if (banners) try derr.writeAll("; banner grabs may be unreliable (the kernel RSTs the SYN-ACK)");
+            try derr.writeByte('\n');
             break :blk null;
         };
     }
@@ -317,6 +403,43 @@ pub fn run(io: std.Io, allocator: std.mem.Allocator, args: []const []const u8, e
     const est_tx_ns: u64 = if (rate > 0) (dash_total / rate) *| ns_per_sec else rx_hard_cap_floor_ns;
     const tx_budget_ns: u64 = (est_tx_ns *| 4) +| rx_hard_cap_floor_ns;
     const hard_cap_ns: u64 = tx_budget_ns +| drain_window_ns;
+
+    const banner_wait_ns: u64 = service.default_banner_wait_ns;
+    const svc_drain_window_ns: u64 = @max(drain_window_ns, banner_wait_ns +| ns_per_sec);
+    const svc_hard_cap_ns: u64 = tx_budget_ns +| svc_drain_window_ns;
+
+    var banners_active = banners;
+    var svc_socket: service.Socket = undefined;
+    var svc_socket_open = false;
+    var svc_engine: ?*service.Engine = null;
+    if (banners_active) {
+        if (service.Socket.open(ifname)) |s| {
+            svc_socket = s;
+            svc_socket_open = true;
+            errdefer svc_socket.close();
+            const svc_eng = try allocator.create(service.Engine);
+            svc_eng.* = service.Engine.init(.{
+                .cookie = ck,
+                .our_ip = src_ip,
+                .src_mac = src_mac,
+                .gw_mac = gw_mac,
+                .banner_wait_ns = banner_wait_ns,
+            });
+            svc_engine = svc_eng;
+        } else |e| {
+            try derr.print("  note: banner engine socket unavailable ({s}); continuing port-scan only\n", .{@errorName(e)});
+            banners_active = false;
+        }
+    }
+    defer if (svc_socket_open) svc_socket.close();
+
+    var fqbuf: [finding_queue_capacity]service.Finding = undefined;
+    var finding_queue = std.Io.Queue(service.Finding).init(&fqbuf);
+    var finding_sink = FindingSink{ .queue = &finding_queue, .io = io };
+    var svc_done = std.atomic.Value(bool).init(true);
+    var findings: std.ArrayList(service.Finding) = .empty;
+    var fdedup = try dedup.Dedup.init(allocator, dedup_capacity);
+    defer fdedup.deinit();
 
     var receiver = rx.Receiver.open(ifname, &tx_done, drain_window_ns, hard_cap_ns) catch |err| switch (err) {
         error.NeedCapNetRaw => {
@@ -371,13 +494,36 @@ pub fn run(io: std.Io, allocator: std.mem.Allocator, args: []const []const u8, e
         return;
     };
 
+    const SvcFuture = @typeInfo(@TypeOf(io.concurrent(svcWorker, .{
+        svc_engine orelse undefined, &svc_socket, finding_sink.sink(), &tx_done, svc_drain_window_ns, svc_hard_cap_ns, &svc_done,
+    }))).error_union.payload;
+    var svc_fut: ?SvcFuture = null;
+    if (banners_active) {
+        svc_done.store(false, .release);
+        if (io.concurrent(svcWorker, .{
+            svc_engine.?, &svc_socket, finding_sink.sink(), &tx_done, svc_drain_window_ns, svc_hard_cap_ns, &svc_done,
+        })) |f| {
+            svc_fut = f;
+        } else |_| {
+            svc_done.store(true, .release);
+            banners_active = false;
+            try derr.writeAll("  note: banner engine could not launch a worker thread; continuing port-scan only\n");
+        }
+    }
+
     var dash = output.Dashboard.init(err_level, interactive, dash_total);
+    dash.banners_mode = banners_active;
     const render_interval_ns: u64 = if (interactive) render_tick_interactive_ns else render_tick_plain_ns;
     var drain_buf: [drain_batch]rx.Result = undefined;
+    var finding_buf: [finding_drain_batch]service.Finding = undefined;
     var last_render: u64 = 0;
 
-    while (!(tx_done.load(.acquire) and rx_done.load(.acquire))) {
+    while (!(tx_done.load(.acquire) and rx_done.load(.acquire) and svc_done.load(.acquire))) {
         drainQueue(io, &queue, drain_buf[0..], &found, found_alloc, &stats, json_out, proto_json);
+        if (banners_active) {
+            drainFindings(io, &finding_queue, finding_buf[0..], &findings, &fdedup, found_alloc, json_out);
+            stats.banners.v.store(svc_engine.?.banners.load(.monotonic), .monotonic);
+        }
         if (json) out.flush() catch {};
         const now = clock.now();
         if (last_render == 0 or now -| last_render >= render_interval_ns) {
@@ -389,8 +535,14 @@ pub fn run(io: std.Io, allocator: std.mem.Allocator, args: []const []const u8, e
 
     const sent = tx_fut.await(io);
     rx_fut.await(io);
+    if (svc_fut) |*f| f.await(io);
     queue.close(io);
     drainQueue(io, &queue, drain_buf[0..], &found, found_alloc, &stats, json_out, proto_json);
+    if (banners_active) {
+        finding_queue.close(io);
+        drainFindings(io, &finding_queue, finding_buf[0..], &findings, &fdedup, found_alloc, json_out);
+        stats.banners.v.store(svc_engine.?.banners.load(.monotonic), .monotonic);
+    }
     if (json) out.flush() catch {};
 
     dash.render(derr, &stats, clock.now() -| t0) catch {};
@@ -415,11 +567,21 @@ pub fn run(io: std.Io, allocator: std.mem.Allocator, args: []const []const u8, e
         } else {
             try derr.writeAll("  no open, closed, or filtered responses observed\n");
         }
+        if (findings.items.len > 0) {
+            std.mem.sort(service.Finding, findings.items, {}, findingLess);
+            try out.writeByte('\n');
+            try renderServiceTable(out, out_level, found_alloc, findings.items);
+            try out.flush();
+        }
     }
 
     const elapsed_s = @as(f64, @floatFromInt(clock.now() - t0)) / @as(f64, @floatFromInt(ns_per_sec));
     try derr.writeByte('\n');
-    try output.renderSummary(derr, err_level, sent, probe_label, ifname, elapsed_s, open_n, closed_n, filtered_n, unfiltered_n);
+    try output.renderSummary(derr, err_level, sent, probe_label, ifname, elapsed_s, open_n, closed_n, filtered_n, unfiltered_n, stats.banners.v.load(.monotonic));
+    if (banners_active) {
+        const drops = svc_engine.?.drops.load(.monotonic);
+        if (drops > 0) try derr.print("  note: {d} banner connection(s) dropped under backpressure (conn-table full at {d})\n", .{ drops, service.default_capacity });
+    }
     if (is_udp) {
         const answered = open_n + closed_n + filtered_n + unfiltered_n;
         try output.renderUnanswered(derr, err_level, sent -| answered);

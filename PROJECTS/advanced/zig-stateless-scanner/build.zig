@@ -10,7 +10,7 @@ pub fn build(b: *std.Build) void {
     const xdp_enabled = b.option(bool, "xdp", "Enable the AF_XDP TX backend (pure-syscall, no libxdp; needs CAP_NET_ADMIN at runtime)") orelse false;
 
     const opts = b.addOptions();
-    opts.addOption([]const u8, "version", "0.0.0-m8");
+    opts.addOption([]const u8, "version", "0.0.0-m9");
     opts.addOption(bool, "xdp", xdp_enabled);
     const build_config_mod = opts.createModule();
 
@@ -66,6 +66,36 @@ pub fn build(b: *std.Build) void {
     });
     template_mod.addImport("packet", packet_mod);
     template_mod.addImport("cookie", cookie_mod);
+
+    const segment_mod = b.createModule(.{
+        .root_source_file = b.path("src/segment.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    segment_mod.addImport("packet", packet_mod);
+
+    const regex_mod = b.createModule(.{
+        .root_source_file = b.path("src/regex.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const probe_mod = b.createModule(.{
+        .root_source_file = b.path("src/probe.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    probe_mod.addImport("regex", regex_mod);
+
+    const service_mod = b.createModule(.{
+        .root_source_file = b.path("src/service.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    service_mod.addImport("packet", packet_mod);
+    service_mod.addImport("cookie", cookie_mod);
+    service_mod.addImport("segment", segment_mod);
+    service_mod.addImport("probe", probe_mod);
 
     const payloads_mod = b.createModule(.{
         .root_source_file = b.path("src/payloads.zig"),
@@ -198,6 +228,7 @@ pub fn build(b: *std.Build) void {
     scancmd_mod.addImport("netutil", netutil_mod);
     scancmd_mod.addImport("output", output_mod);
     scancmd_mod.addImport("stealth", stealth_mod);
+    scancmd_mod.addImport("service", service_mod);
 
     const exe = b.addExecutable(.{
         .name = "zingela",
@@ -228,7 +259,7 @@ pub fn build(b: *std.Build) void {
     smoke_step.dependOn(&smoke_cmd.step);
 
     const test_step = b.step("test", "Run unit tests");
-    const test_mods = [_]*std.Build.Module{ packet_mod, cli_mod, smoke_mod, cookie_mod, numtheory_mod, targets_mod, ratelimit_mod, template_mod, payloads_mod, udp_mod, afpacket_mod, xdp_mod, afxdp_mod, packet_io_mod, tx_mod, txcmd_mod, classify_mod, dedup_mod, rx_mod, netutil_mod, stealth_mod, output_mod, scancmd_mod };
+    const test_mods = [_]*std.Build.Module{ packet_mod, cli_mod, smoke_mod, cookie_mod, numtheory_mod, targets_mod, ratelimit_mod, template_mod, segment_mod, regex_mod, probe_mod, service_mod, payloads_mod, udp_mod, afpacket_mod, xdp_mod, afxdp_mod, packet_io_mod, tx_mod, txcmd_mod, classify_mod, dedup_mod, rx_mod, netutil_mod, stealth_mod, output_mod, scancmd_mod };
     for (test_mods) |mod| {
         const t = b.addTest(.{ .root_module = mod });
         const rt = b.addRunArtifact(t);
