@@ -175,4 +175,4 @@ Tools, courses, certifications, communities, and frameworks for cybersecurity pr
 
 ## License
 
-AGPL 3.0
+[AGPL 3.0](LICENSE).
