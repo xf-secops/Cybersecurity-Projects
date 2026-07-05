@@ -6,7 +6,7 @@ disasm.py
 from dataclasses import dataclass
 
 from capstone import CS_ARCH_X86, CS_MODE_64, CS_OPT_SYNTAX_INTEL, Cs
-from capstone.x86 import X86_OP_IMM
+from capstone.x86 import X86_OP_IMM, X86_OP_MEM, X86_REG_RIP
 
 from rveng.engine.elf import ElfImage, Symbol
 
@@ -31,6 +31,7 @@ class Instruction:
     raw: bytes
     immediate: int | None
     branch_target: int | None = None
+    rip_target: int | None = None
 
     @property
     def size(self) -> int:
@@ -68,6 +69,13 @@ def _immediate(ins) -> int | None:
     return value
 
 
+def _rip_target(ins) -> int | None:
+    for operand in ins.operands:
+        if operand.type == X86_OP_MEM and operand.mem.base == X86_REG_RIP:
+            return ins.address + ins.size + operand.mem.disp
+    return None
+
+
 def disassemble(code: bytes, base: int = 0) -> list[Instruction]:
     """
     Decode a byte range into annotated instructions at virtual base
@@ -85,7 +93,51 @@ def disassemble(code: bytes, base: int = 0) -> list[Instruction]:
             raw=bytes(ins.bytes),
             immediate=None if flow else imm,
             branch_target=imm if flow else None,
+            rip_target=_rip_target(ins),
         ))
+    return out
+
+
+def disassemble_text(image: ElfImage) -> list[Instruction]:
+    """
+    Disassemble the whole .text section for whole-binary analysis
+    """
+    section = image.section(".text")
+    if section is None:
+        return []
+    code = image.data[section.offset:section.offset + section.size]
+    return disassemble(code, section.addr)
+
+
+RET = "ret"
+
+
+def _section_at(image: ElfImage, vaddr: int):
+    for section in image.sections:
+        if section.addr == 0 or section.is_nobits:
+            continue
+        if section.addr <= vaddr < section.addr + section.size:
+            return section
+    return None
+
+
+def disassemble_at(
+        image: ElfImage,
+        vaddr: int,
+        max_bytes: int = 4096) -> list[Instruction]:
+    """
+    Disassemble from a raw virtual address until the first ret
+    """
+    section = _section_at(image, vaddr)
+    if section is None:
+        raise ValueError("address is not in a mapped section")
+    start = vaddr - section.addr + section.offset
+    end = min(start + max_bytes, section.offset + section.size)
+    out = []
+    for ins in disassemble(image.data[start:end], vaddr):
+        out.append(ins)
+        if ins.mnemonic == RET:
+            break
     return out
 
 

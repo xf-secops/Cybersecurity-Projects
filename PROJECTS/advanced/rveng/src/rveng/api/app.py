@@ -6,22 +6,30 @@ app.py
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 
 from rveng.api import schemas
 from rveng.api.limits import (
     DEFAULT_SESSION,
+    DEV_ORIGIN_REGEX,
+    MAX_BODY_BYTES,
     MAX_DISASM_BYTES,
     MAX_HEX_BYTES,
+    MAX_SESSION_LEN,
 )
+from rveng.api.middleware import BodySizeLimitMiddleware
 from rveng.api.store import (
     ChallengeStore,
     InMemoryProgress,
     ProgressStore,
     load_store,
 )
-from rveng.engine import disasm, hex as hexmod, strings
+from rveng.engine import cfg as cfgmod
+from rveng.engine import disasm, hex as hexmod, strings, xref
 from rveng.engine.challenge import Challenge, grade
+from rveng.engine.discover import discover_functions
 from rveng.engine.elf import ElfImage, NotAnElf
+from rveng.engine.plt import plt_map
 
 CHALLENGES_ROOT = Path(__file__).resolve().parents[3] / "challenges"
 
@@ -35,6 +43,13 @@ def create_app(
     store = store or load_store(CHALLENGES_ROOT)
     progress = progress or InMemoryProgress()
     app = FastAPI(title="rveng")
+    app.add_middleware(BodySizeLimitMiddleware, max_bytes=MAX_BODY_BYTES)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origin_regex=DEV_ORIGIN_REGEX,
+        allow_methods=["GET", "POST"],
+        allow_headers=["*"],
+    )
 
     def require(cid: str) -> Challenge:
         challenge = store.get(cid)
@@ -47,6 +62,27 @@ def create_app(
             return ElfImage(challenge.binary)
         except NotAnElf as exc:
             raise HTTPException(422, f"not an ELF: {exc}")
+
+    def instructions_for(
+            image: ElfImage,
+            symbol: str | None,
+            address: int | None) -> tuple[list[disasm.Instruction], str]:
+        if symbol:
+            sym = image.symbol(symbol)
+            if sym is None:
+                raise HTTPException(404, "symbol not found")
+            if sym.size > MAX_DISASM_BYTES:
+                raise HTTPException(413, "symbol too large to disassemble")
+            try:
+                return disasm.disassemble_symbol(image, sym), symbol
+            except ValueError as exc:
+                raise HTTPException(422, str(exc))
+        if address is not None:
+            try:
+                return disasm.disassemble_at(image, address), f"sub_{address:x}"
+            except ValueError as exc:
+                raise HTTPException(422, str(exc))
+        raise HTTPException(422, "provide a symbol or an address")
 
     @app.get("/api/challenges")
     def list_challenges() -> list[schemas.ChallengeSummary]:
@@ -96,26 +132,30 @@ def create_app(
                 schemas.FunctionView(
                     name=f.name, value=f.value, size=f.size)
                 for f in image.functions() if f.name
+            ],
+            discovered=[
+                schemas.DiscoveredFunctionView(
+                    address=d.address, label=d.label)
+                for d in discover_functions(image)
             ])
 
     @app.get("/api/challenges/{cid}/disasm")
     def disasm_view(
-            cid: str, symbol: str = Query(...)) -> schemas.DisasmView:
+            cid: str,
+            symbol: str | None = Query(None),
+            address: int | None = Query(None, ge=0),
+            session: str = Query(
+                DEFAULT_SESSION, max_length=MAX_SESSION_LEN)
+            ) -> schemas.DisasmView:
         c = require(cid)
         image = elf_of(c)
-        sym = image.symbol(symbol)
-        if sym is None:
-            raise HTTPException(404, "symbol not found")
-        try:
-            instructions = disasm.disassemble_symbol(image, sym)
-        except ValueError as exc:
-            raise HTTPException(422, str(exc))
-        if sum(i.size for i in instructions) > MAX_DISASM_BYTES:
-            raise HTTPException(413, "symbol too large to disassemble")
-        gate = disasm.find_gate(instructions)
+        instructions, label = instructions_for(image, symbol, address)
+        imports = plt_map(image)
+        solved = c.id in progress.solved(session)
+        gate = disasm.find_gate(instructions) if solved else None
         gate_addr = gate.address if gate else None
         return schemas.DisasmView(
-            symbol=symbol,
+            symbol=label,
             gate_address=gate_addr,
             instructions=[
                 schemas.InstructionView(
@@ -123,8 +163,47 @@ def create_app(
                     op_str=i.op_str, bytes=i.raw.hex(),
                     immediate=i.immediate,
                     branch_target=i.branch_target,
+                    rip_target=i.rip_target,
+                    call_name=(imports.get(i.branch_target)
+                               if i.mnemonic == "call" else None),
                     is_gate=(i.address == gate_addr))
                 for i in instructions
+            ])
+
+    @app.get("/api/challenges/{cid}/cfg")
+    def cfg_view(
+            cid: str,
+            symbol: str | None = Query(None),
+            address: int | None = Query(None, ge=0)) -> schemas.CfgView:
+        c = require(cid)
+        image = elf_of(c)
+        instructions, label = instructions_for(image, symbol, address)
+        graph = cfgmod.build_cfg(instructions)
+        return schemas.CfgView(
+            symbol=label,
+            blocks=[
+                schemas.CfgBlockView(
+                    start=b.start, end=b.end,
+                    instructions=list(b.instructions))
+                for b in graph.blocks
+            ],
+            edges=[
+                schemas.CfgEdgeView(src=e.src, dst=e.dst, kind=e.kind)
+                for e in graph.edges
+            ])
+
+    @app.get("/api/challenges/{cid}/xrefs")
+    def xrefs_view(
+            cid: str, target: int = Query(..., ge=0)) -> schemas.XrefsView:
+        c = require(cid)
+        image = elf_of(c)
+        refs = xref.xrefs_to(disasm.disassemble_text(image), target)
+        return schemas.XrefsView(
+            target=target,
+            references=[
+                schemas.XrefView(
+                    from_addr=r.from_addr, to_addr=r.to_addr, kind=r.kind)
+                for r in refs
             ])
 
     @app.get("/api/challenges/{cid}/strings")
@@ -154,7 +233,9 @@ def create_app(
 
     @app.get("/api/progress")
     def get_progress(
-            session: str = Query(DEFAULT_SESSION)) -> schemas.ProgressView:
+            session: str = Query(
+                DEFAULT_SESSION,
+                max_length=MAX_SESSION_LEN)) -> schemas.ProgressView:
         solved = progress.solved(session)
         return schemas.ProgressView(
             session=session,

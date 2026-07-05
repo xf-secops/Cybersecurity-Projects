@@ -4,6 +4,7 @@ store.py
 """
 
 import json
+import logging
 from pathlib import Path
 from typing import Protocol
 
@@ -14,6 +15,8 @@ from rveng.engine.challenge import (
     IdentifiedSymbol,
     PatchedBytes,
 )
+
+log = logging.getLogger(__name__)
 
 MANIFEST = "challenge.json"
 TARGET = "target"
@@ -32,15 +35,18 @@ class ChallengeError(ValueError):
 
 def _build_answer(spec: dict, binary: bytes):
     category = spec.get("category")
-    if category == CAT_FOUND_VALUE:
-        return FoundValue(spec["expected"])
-    if category == CAT_IDENTIFIED_SYMBOL:
-        return IdentifiedSymbol(spec["name"])
-    if category == CAT_PATCHED_BYTES:
-        offset = spec["offset"]
-        replacement = bytes.fromhex(spec["patch"])
-        known_good = patch.apply(binary, offset, replacement)
-        return PatchedBytes(offset=offset, known_good=known_good)
+    try:
+        if category == CAT_FOUND_VALUE:
+            return FoundValue(spec["expected"])
+        if category == CAT_IDENTIFIED_SYMBOL:
+            return IdentifiedSymbol(spec["name"])
+        if category == CAT_PATCHED_BYTES:
+            offset = spec["offset"]
+            replacement = bytes.fromhex(spec["patch"])
+            known_good = patch.apply(binary, offset, replacement)
+            return PatchedBytes(offset=offset, known_good=known_good)
+    except (KeyError, ValueError) as exc:
+        raise ChallengeError(f"bad {category} answer spec: {exc}") from exc
     raise ChallengeError(f"unknown answer category: {category}")
 
 
@@ -51,18 +57,21 @@ def load_challenge(directory: Path) -> Challenge:
     manifest_path = directory / MANIFEST
     if not manifest_path.is_file():
         raise ChallengeError(f"no manifest in {directory}")
-    manifest = json.loads(manifest_path.read_text())
-    binary = (directory / TARGET).read_bytes()
-    source = (directory / SOURCE).read_text()
-    return Challenge(
-        id=manifest["id"],
-        module=manifest["module"],
-        title=manifest["title"],
-        mission=manifest["mission"],
-        binary=binary,
-        source=source,
-        answer=_build_answer(manifest["answer"], binary),
-    )
+    try:
+        manifest = json.loads(manifest_path.read_text())
+        binary = (directory / TARGET).read_bytes()
+        source = (directory / SOURCE).read_text()
+        return Challenge(
+            id=manifest["id"],
+            module=manifest["module"],
+            title=manifest["title"],
+            mission=manifest["mission"],
+            binary=binary,
+            source=source,
+            answer=_build_answer(manifest["answer"], binary),
+        )
+    except (json.JSONDecodeError, KeyError, OSError) as exc:
+        raise ChallengeError(f"malformed challenge in {directory}: {exc}") from exc
 
 
 class ChallengeStore:
@@ -86,8 +95,12 @@ def load_store(root: Path) -> ChallengeStore:
     """
     challenges = []
     for directory in sorted(root.iterdir()):
-        if (directory / MANIFEST).is_file():
+        if not (directory / MANIFEST).is_file():
+            continue
+        try:
             challenges.append(load_challenge(directory))
+        except ChallengeError as exc:
+            log.warning("skipping challenge: %s", exc)
     return ChallengeStore(challenges)
 
 

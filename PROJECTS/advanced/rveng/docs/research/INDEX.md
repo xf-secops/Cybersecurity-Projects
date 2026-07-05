@@ -23,6 +23,7 @@ binaries safe, and it is a hard constraint, not a preference.
 | `02-x86-64-capstone.md` | implementing `engine/disasm.py`: the minimal x86-64 instruction set these challenges use, the cmp/jcc gate pattern, capstone 5.0.9 API, the objdump-vs-capstone byte-for-byte agreement KAT, the Intel-syntax constant correction |
 | `03-pedagogy.md` | implementing `engine/challenge.py` and the runner: the solve-then-reveal loop, the three answer-spec categories (found-value, identified-symbol, patched-bytes), module-to-category mapping, grading rules |
 | `04-no-execution-posture.md` | any API or engine work touching binaries: the enumeration proving every operation is read-only, why patch grading is a static diff, the API input constraints, the standing no-execution rule |
+| `05-static-analysis.md` | implementing the M3.5 depth engine (`plt.py`, `xref.py`, `cfg.py`, stripped discovery): PLT/GOT/.rela.plt/.dynsym import resolution, RIP-relative operand math, the basic-block leader algorithm, prologue-scan function discovery, all KAT-traced to `gate` and `gate_stripped` |
 
 Key verified facts pulled forward:
 - ELF header cross-checks exactly to raw bytes: entry `0x401060`, e_shoff
