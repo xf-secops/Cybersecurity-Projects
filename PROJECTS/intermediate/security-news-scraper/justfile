@@ -1,0 +1,33 @@
+# ©AngelaMos | 2026
+# justfile
+
+set shell := ["bash", "-cu"]
+
+binary := "nadezhda"
+
+default:
+    @just --list
+
+build:
+    go build -o {{binary}} ./cmd/nadezhda
+
+run *args:
+    go run ./cmd/nadezhda {{args}}
+
+test:
+    go test ./...
+
+vet:
+    go vet ./...
+
+fmt:
+    gofmt -w .
+
+lint: vet
+    test -z "$(gofmt -l .)"
+
+tidy:
+    go mod tidy
+
+clean:
+    rm -f {{binary}} *.db *.db-wal *.db-shm
