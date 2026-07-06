@@ -7,9 +7,9 @@ ModSecurity Core Rule Set
 
 RuleEngine.score_request evaluates requests against 10
 regex-based _PatternRules (LOG4SHELL 0.95, COMMAND_
-INJECTION 0.90, SQL_INJECTION 0.85, XSS 0.80, FILE_
-INCLUSION 0.75, XXE_INJECTION 0.82, SSRF 0.70, CRLF_
-INJECTION 0.65, PATH_TRAVERSAL 0.60, OPEN_REDIRECT 0.55),
+INJECTION 0.90, SQL_INJECTION 0.85, XXE_INJECTION 0.82,
+XSS 0.80, FILE_INCLUSION 0.75, SSRF 0.70, CRLF_INJECTION
+0.65, PATH_TRAVERSAL 0.60, OPEN_REDIRECT 0.55),
 double-encoding detection (0.40), scanner user-agent
 signature matching (0.35), and 2 _ThresholdRules
 (RATE_ANOMALY >100 req/min 0.30, HIGH_ERROR_RATE >50%
@@ -78,12 +78,12 @@ _PATTERN_RULES: list[_PatternRule] = [
     _PatternRule("LOG4SHELL", LOG4SHELL, 0.95),
     _PatternRule("COMMAND_INJECTION", COMMAND_INJECTION, 0.90),
     _PatternRule("SQL_INJECTION", SQLI, 0.85),
-    _PatternRule("XSS", XSS, 0.80),
     _PatternRule("XXE_INJECTION", XXE_INJECTION, 0.82),
+    _PatternRule("XSS", XSS, 0.80),
     _PatternRule("FILE_INCLUSION", FILE_INCLUSION, 0.75),
     _PatternRule("SSRF", SSRF, 0.70),
-    _PatternRule("PATH_TRAVERSAL", PATH_TRAVERSAL, 0.60),
     _PatternRule("CRLF_INJECTION", CRLF_INJECTION, 0.65),
+    _PatternRule("PATH_TRAVERSAL", PATH_TRAVERSAL, 0.60),
     _PatternRule("OPEN_REDIRECT", OPEN_REDIRECT, 0.55),
 ]
 
