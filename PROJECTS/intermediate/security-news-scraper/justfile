@@ -29,5 +29,15 @@ lint: vet
 tidy:
     go mod tidy
 
+ollama-up:
+    docker compose -f internal/setup/ollama.compose.yml up -d
+    @echo "ollama starting on 127.0.0.1:39847 (override with OLLAMA_HOST_PORT) — the first run pulls qwen2.5:7b (a few minutes). watch progress with: just ollama-logs"
+
+ollama-down:
+    docker compose -f internal/setup/ollama.compose.yml down
+
+ollama-logs:
+    docker compose -f internal/setup/ollama.compose.yml logs -f
+
 clean:
     rm -f {{binary}} *.db *.db-wal *.db-shm

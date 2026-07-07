@@ -4,9 +4,12 @@
 package main
 
 import (
+	"os"
+
 	"github.com/spf13/cobra"
 
 	"github.com/CarterPerez-dev/nadezhda/internal/config"
+	"github.com/CarterPerez-dev/nadezhda/internal/setup"
 )
 
 var (
@@ -27,6 +30,9 @@ func init() {
 }
 
 func loadConfig() (config.Config, error) {
+	if err := setup.Load(); err != nil {
+		return config.Config{}, err
+	}
 	cfg, err := config.Load(flagConfig)
 	if err != nil {
 		return config.Config{}, err
@@ -34,5 +40,21 @@ func loadConfig() (config.Config, error) {
 	if flagDB != "" {
 		cfg.DBPath = flagDB
 	}
+	if p := os.Getenv(setup.EnvProvider); p != "" {
+		cfg.AI.Enabled = true
+		cfg.AI.Provider = p
+	}
+	if u := os.Getenv(setup.EnvQwenURL); u != "" {
+		cfg.AI.Qwen.BaseURL = u
+	}
 	return cfg, nil
+}
+
+func isInteractive(cmd *cobra.Command) bool {
+	f, ok := cmd.InOrStdin().(*os.File)
+	if !ok {
+		return false
+	}
+	fi, err := f.Stat()
+	return err == nil && fi.Mode()&os.ModeCharDevice != 0
 }

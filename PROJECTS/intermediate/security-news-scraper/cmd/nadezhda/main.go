@@ -3,10 +3,16 @@
 
 package main
 
-import "os"
+import (
+	"context"
+	"os"
+	"os/signal"
+)
 
 func main() {
-	if err := rootCmd.Execute(); err != nil {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	if err := rootCmd.ExecuteContext(ctx); err != nil {
 		os.Exit(1)
 	}
 }

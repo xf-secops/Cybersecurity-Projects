@@ -42,14 +42,14 @@ const (
 	defaultWeightEPSS     = 0.08
 
 	defaultAIProvider   = "qwen"
-	defaultQwenBaseURL  = "http://localhost:11434/v1"
+	defaultQwenBaseURL  = "http://localhost:39847/v1"
 	defaultQwenModel    = "qwen2.5:7b"
 	defaultOpenAIURL    = "https://api.openai.com/v1"
 	defaultOpenAIModel  = "gpt-4o-mini"
 	defaultGeminiURL    = "https://generativelanguage.googleapis.com/v1beta/openai/"
 	defaultGeminiModel  = "gemini-2.5-flash"
 	defaultAnthropicURL = "https://api.anthropic.com/v1"
-	defaultClaudeModel  = "claude-opus-4-8"
+	defaultClaudeModel  = "claude-sonnet-4-6"
 )
 
 var defaultTrackingParams = []string{
