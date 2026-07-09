@@ -10,13 +10,17 @@
 ╚═╝  ╚═══╝╚═╝  ╚═╝╚═════╝ ╚══════╝╚══════╝╚═╝  ╚═╝╚═════╝ ╚═╝  ╚═╝
 ```
 
-[![Cybersecurity Projects](https://img.shields.io/badge/Cybersecurity--Projects-Project%20%2337-red?style=flat&logo=github)](https://github.com/CarterPerez-dev/Cybersecurity-Projects/tree/main/PROJECTS/intermediate/security-news-scraper)
+[![Cybersecurity Projects](https://img.shields.io/badge/Cybersecurity--Projects-Project%20%2339-red?style=flat&logo=github)](https://github.com/CarterPerez-dev/Cybersecurity-Projects/tree/main/PROJECTS/intermediate/security-news-scraper)
 [![Go](https://img.shields.io/badge/Go-1.25-00ADD8?style=flat&logo=go&logoColor=white)](https://go.dev)
 [![Keyless](https://img.shields.io/badge/enrichment-keyless-4B7BEC?style=flat)](https://www.cisa.gov/known-exploited-vulnerabilities-catalog)
 [![Single static binary](https://img.shields.io/badge/binary-single%20static-6d4aff?style=flat)](https://pkg.go.dev/modernc.org/sqlite)
 [![License: AGPLv3](https://img.shields.io/badge/License-AGPL_v3-purple.svg)](https://www.gnu.org/licenses/agpl-3.0)
 
 > A keyless security-news and CVE intelligence engine in Go. Point it at a set of RSS and Atom feeds and it fetches them politely, clusters the same story as it breaks across outlets, extracts every CVE it mentions, enriches each one with authoritative exploit intelligence, ranks the whole set by what actually matters, and hands you a browsable dossier in your terminal. It ships as a single static binary over a local SQLite store, needs no API key to do any of it, and treats the news as the product with the CVE data as the intelligence that sharpens it.
+
+<p align="center">
+    <img src="assets/tui.png" alt="The nadezhda terminal UI: a ranked, color-coded dossier of security news, with per-story scores, source dots, and CVE severity" width="100%">
+</p>
 
 ## Why aggregate security news
 
@@ -26,7 +30,7 @@ The signal is usually some combination of the same few factors. A vulnerability 
 
 The cost of missing that signal is not hypothetical. Log4Shell went from a GitHub issue to every security outlet on earth within hours and landed on the KEV catalog almost immediately; a tool that ranks by cross-outlet velocity plus KEV plus EPSS floats it to the top of the first scrape. Equifax fell to a known Apache Struts flaw that had a patch available for months, and the intelligence to prioritize it sat in public feeds the whole time, so the failure was one of triage, not of information. MOVEit was mass-exploited in a tight window where the advisories, the KEV listing, and the coverage all arrived together. Velocity was the tell.
 
-## What Works Today
+## What it is
 
 This is not a stub. It ingests real feeds, enriches real CVEs from keyless authoritative sources, clusters and ranks real coverage, and surfaces it four ways. Every capability below is exercised by unit tests, offline fixture-driven tests, and a live run against the real feeds.
 
