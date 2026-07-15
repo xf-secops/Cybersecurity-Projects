@@ -1,0 +1,13 @@
+/*
+©AngelaMos | 2026
+all.go
+
+Side-effect imports that register every carrier implementation into the registry
+*/
+
+package all
+
+import (
+	_ "github.com/CarterPerez-dev/crypha/internal/carrier/image"
+	_ "github.com/CarterPerez-dev/crypha/internal/carrier/text"
+)
