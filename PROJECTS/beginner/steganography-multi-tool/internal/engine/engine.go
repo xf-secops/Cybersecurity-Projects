@@ -173,6 +173,14 @@ func Techniques(format string) []string {
 	}
 }
 
+func Overhead(encrypted bool) int {
+	return payload.Overhead(encrypted)
+}
+
+func EnvelopeSize(data []byte, opts payload.Options) (int, error) {
+	return payload.EnvelopeSize(data, opts)
+}
+
 func locate(format string, stego []byte) (carrier.Carrier, []byte, error) {
 	if format != "" {
 		c, err := ResolveCarrier(format, "")

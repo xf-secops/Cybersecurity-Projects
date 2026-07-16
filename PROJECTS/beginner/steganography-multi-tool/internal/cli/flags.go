@@ -15,6 +15,7 @@ const (
 	cmdCapacity = "capacity"
 	cmdFormats  = "formats"
 	cmdVersion  = "version"
+	cmdTUI      = "tui"
 
 	flagJSON       = "json"
 	flagFormat     = "format"

@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/CarterPerez-dev/crypha/internal/config"
+	"github.com/CarterPerez-dev/crypha/internal/tui"
 	"github.com/spf13/cobra"
 )
 
@@ -27,12 +28,19 @@ func newRootCmd() *cobra.Command {
 	}
 	root.SetVersionTemplate(config.BinaryName + " {{.Version}}\n")
 	root.PersistentFlags().Bool(flagJSON, false, "emit machine-readable JSON")
+	root.RunE = func(cmd *cobra.Command, args []string) error {
+		if len(args) == 0 && launchInteractive() {
+			return tui.Run()
+		}
+		return cmd.Help()
+	}
 	root.AddCommand(
 		newHideCmd(),
 		newRevealCmd(),
 		newCapacityCmd(),
 		newFormatsCmd(),
 		newVersionCmd(),
+		newTuiCmd(),
 	)
 	return root
 }

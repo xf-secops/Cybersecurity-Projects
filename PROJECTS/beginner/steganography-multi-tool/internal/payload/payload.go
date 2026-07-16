@@ -79,3 +79,15 @@ func Overhead(encrypted bool) int {
 	}
 	return base + cipherLen + paramsLen + saltLen + nonceLen + tagLen
 }
+
+func EnvelopeSize(data []byte, opts Options) (int, error) {
+	body := data
+	if opts.Compress {
+		c, err := compress(data)
+		if err != nil {
+			return 0, err
+		}
+		body = c
+	}
+	return Overhead(len(opts.Passphrase) > 0) + len(body), nil
+}
