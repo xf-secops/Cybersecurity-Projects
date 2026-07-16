@@ -39,12 +39,16 @@ const (
 	cipherIDChaCha20  byte = 0x00
 	cipherIDAES256GCM byte = 0x01
 
-	saltLen   = 16
-	nonceLen  = 12
-	keyLen    = 32
-	lenField  = 4
-	crcField  = 4
-	paramsLen = 9
+	saltLen    = 16
+	nonceLen   = 12
+	keyLen     = 32
+	lenField   = 4
+	crcField   = 4
+	paramsLen  = 9
+	versionLen = 1
+	flagsLen   = 1
+	cipherLen  = 1
+	tagLen     = 16
 
 	argonDefaultTime   uint32 = 3
 	argonDefaultMemory uint32 = 64 * 1024
@@ -67,3 +71,11 @@ var (
 	ErrDecrypt            = errors.New("crypha: decryption failed (wrong passphrase or tampered data)")
 	ErrUnknownCipher      = errors.New("crypha: unknown cipher")
 )
+
+func Overhead(encrypted bool) int {
+	base := len(magic) + versionLen + flagsLen + lenField + crcField
+	if !encrypted {
+		return base
+	}
+	return base + cipherLen + paramsLen + saltLen + nonceLen + tagLen
+}

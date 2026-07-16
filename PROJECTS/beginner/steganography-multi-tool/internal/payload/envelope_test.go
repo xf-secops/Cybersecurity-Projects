@@ -156,3 +156,23 @@ func TestStrengthParams(t *testing.T) {
 		t.Errorf("default params wrong: %+v", p)
 	}
 }
+
+func TestOverheadMatchesEnvelope(t *testing.T) {
+	plain := []byte("a modest secret")
+
+	clear, err := Pack(plain, Options{})
+	if err != nil {
+		t.Fatalf("pack plaintext: %v", err)
+	}
+	if got := len(clear) - len(plain); got != Overhead(false) {
+		t.Errorf("plaintext overhead = %d, Overhead(false) = %d", got, Overhead(false))
+	}
+
+	sealed, err := Pack(plain, Options{Passphrase: []byte("pw"), Cipher: CipherChaCha20})
+	if err != nil {
+		t.Fatalf("pack encrypted: %v", err)
+	}
+	if got := len(sealed) - len(plain); got != Overhead(true) {
+		t.Errorf("encrypted overhead = %d, Overhead(true) = %d", got, Overhead(true))
+	}
+}
